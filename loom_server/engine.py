@@ -777,21 +777,24 @@ def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict
         events.append(dict(now))
         rs.setdefault("attributionResolutions", {}).setdefault(claim_key, {})[dkey] = dict(now)
         rec.setdefault("stages", {}).setdefault("research", rs)
+        # The merge belongs INSIDE this transaction. Doing it afterwards meant reading the record again, merging,
+        # and writing — and any decision saved by someone else between that read and that write was overwritten
+        # by a record that predated it. Both callers were told they had succeeded and only one survived. The
+        # record is already in hand here, so the derived state is rebuilt from it and written with it, once.
+        if rs.get("batches"):
+            try:
+                runner(store, cid)._merge_research(rec)
+            except Exception as e:
+                # The decision is the deliverable; derived state is rebuilt on the next merge. Say so rather
+                # than fail a decision that is otherwise sound, and never leave a half-merged record behind.
+                rec["derivedStateStale"] = {"at": storage.now_iso(), "because": type(e).__name__,
+                                            "note": "A decision was recorded but the views built from it could "
+                                                    "not be rebuilt in the same step. Re-open the course."}
+        else:
+            rec.pop("derivedStateStale", None)
         return dict(now)
 
-    got = storage.update_engine(store, cid, change)
-    # The decision is written, but what the app SERVES is the saved record, and the saved record still carries
-    # the judgement as it stood before. Writing without this left a decision that was real in the file and
-    # invisible on the screen until something else happened to re-merge. The merge is done after the write, not
-    # inside it, so a failure here cannot lose a decision that is already safely recorded.
-    try:
-        rec = storage.read_engine(store, cid)
-        if isinstance(rec, dict) and ((rec.get("stages") or {}).get("research") or {}).get("batches"):
-            runner(store, cid)._merge_research(rec)
-            storage.write_engine(store, cid, rec)
-    except Exception:
-        pass
-    return got
+    return storage.update_engine(store, cid, change)
 
 
 def decision_history(rec: dict, claim_key: str | None = None, dkey: str | None = None) -> list:
@@ -1956,17 +1959,36 @@ class Runner:
             against another, and no further run is asked in the hope of breaking the tie.
             """
             past = history.setdefault(claim_key, [])
-            same_input = [h for h in past if h.get("fingerprint") == entry.get("fingerprint")]
+            # The inline index is a window, not the history. Judgements that scroll out of it are kept in the
+            # archive beside the course, and reading only the window meant a conflict vanished the moment its
+            # entries were evicted: come back to the same evidence later and the earlier contradiction was gone,
+            # which is exactly the forgetting the archive exists to prevent.
+            archived = []
+            try:
+                archived = storage.read_archived_judgements(self.store, self.cid, claim_key)
+            except Exception:
+                archived = [{"unreadable": True}]
+            unreadable = [h for h in archived if not isinstance(h, dict) or h.get("unreadable")]
+            whole = [h for h in archived if isinstance(h, dict) and not h.get("unreadable")] + past
+            same_input = [h for h in whole if h.get("fingerprint") == entry.get("fingerprint")]
             prev = same_input[-1] if same_input else None
+            if unreadable:
+                # Part of the history cannot be read, so Loom cannot say there was no earlier disagreement. That
+                # is recorded on the judgement rather than passed over in silence.
+                entry["historyIncomplete"] = {
+                    "archiveEntriesUnreadable": len(unreadable),
+                    "note": ("Some earlier judgements for this source could not be read, so an earlier "
+                             "disagreement cannot be ruled out. This is not a statement that there was none.")}
             live: dict = {}
             if prev is not None:
                 # A contradiction does not expire by being repeated. Answer yes, then no, then no again, and the
                 # last two runs agree, so comparing only against the run before would show nothing wrong by the
                 # third — while the first two still contradict each other on the same evidence. Unresolved
                 # disagreements are therefore carried forward under their own key until a person settles them.
-                # Every earlier judgement on this same evidence is consulted, not only the one before. A
-                # conflict raised three runs ago and absent from the latest entry is still unsettled: reading
-                # only the previous entry let it drop out of sight the moment one run happened not to repeat it.
+                # Every earlier judgement on this same evidence is consulted — archived ones included, not only
+                # the one before. A conflict raised three runs ago and absent from the latest entry is still
+                # unsettled: reading only the previous entry let it drop out of sight the moment one run
+                # happened not to repeat it.
                 for older in same_input:
                     for d in older.get("unresolvedDisagreements") or []:
                         if isinstance(d, dict) and d.get("key"):

@@ -498,10 +498,10 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
     """
     name = _fp_name(fingerprint) + ".json"
     with LOCK:
-        d = provenance_dir(store, cid, "requests", make=True)
-        if d is None:
-            raise StoreError("This course's request store is not a directory Loom will write to.")
-        path = d / name
+        path = provenance_file(store, cid, "requests", name, make=True)
+        if path is None:
+            raise StoreError("Loom will not write that request into this course: the path is not a regular file "
+                             "of its own.")
         if not path.exists():
             write_atomic(path, json.dumps(payload, indent=1, ensure_ascii=False))
     return name
@@ -509,8 +509,8 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
 
 def read_request_snapshot(store, cid: str, fingerprint: str) -> dict | None:
     with LOCK:
-        p = provenance_dir(store, cid, "requests")
-        return read_json(p / (_fp_name(fingerprint) + ".json")) if p else None
+        p = provenance_file(store, cid, "requests", _fp_name(fingerprint) + ".json")
+        return read_json(p) if p else None
 
 
 def archive_judgements(store, cid: str, key: str, entries: list) -> str:
@@ -519,10 +519,11 @@ def archive_judgements(store, cid: str, key: str, entries: list) -> str:
         return ""
     name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
     with LOCK:
-        d = provenance_dir(store, cid, "attribution-history", make=True)
-        if d is None:
-            raise StoreError("This course's judgement archive is not a directory Loom will write to.")
-        with (d / name).open("a", encoding="utf-8") as fh:
+        path = provenance_file(store, cid, "attribution-history", name, make=True)
+        if path is None:
+            raise StoreError("Loom will not append to that archive: the path is not a regular file of this "
+                             "course.")
+        with path.open("a", encoding="utf-8") as fh:
             for e in entries:
                 fh.write(json.dumps({"key": key, **e}, ensure_ascii=False) + "\n")
     return name
@@ -530,9 +531,8 @@ def archive_judgements(store, cid: str, key: str, entries: list) -> str:
 
 def read_archived_judgements(store, cid: str, key: str) -> list:
     name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
-    p = provenance_dir(store, cid, "attribution-history")
-    path = (p / name) if p else None
-    if path is None or path.is_symlink() or not path.is_file():
+    path = provenance_file(store, cid, "attribution-history", name)
+    if path is None or not path.is_file():
         return []
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -569,6 +569,27 @@ def _inside(course: Path, p: Path) -> bool:
         return p.resolve().is_relative_to(course.resolve())
     except (OSError, ValueError):
         return False
+
+
+def provenance_file(store, cid: str, sub: str, name: str, make: bool = False) -> Path | None:
+    """One provenance file of this course, or None when the path is not one Loom will touch.
+
+    Checking the directory was not enough. A link planted as a LEAF was still opened: a read returned a file from
+    outside the course, and an append wrote through the link into it. Every provenance read and write goes through
+    here, so the leaf is checked as well as the way to it, and anything that is not a regular file of this course
+    — a link, a directory, a socket — is refused rather than followed.
+    """
+    if not _PROV_NAME.match(str(name or "")):
+        return None
+    d = provenance_dir(store, cid, sub, make=make)
+    if d is None:
+        return None
+    p = d / name
+    if p.is_symlink() or (p.exists() and not p.is_file()):
+        return None
+    if not _inside(course_dir(store, cid), p):
+        return None
+    return p
 
 
 def provenance_dir(store, cid: str, sub: str, make: bool = False) -> Path | None:
@@ -656,11 +677,11 @@ def _place_provenance(store, cid: str, bundle) -> dict | None:
                 # Checked BEFORE anything is written, so a backup cannot be used to fill a course's disk.
                 refused.append(f"{name} (too large or too many to restore)")
                 continue
-            target = provenance_dir(store, cid, sub, make=True)
+            target = provenance_file(store, cid, sub, name, make=True)
             if target is None:
-                refused.append(f"{name} (its directory in this course is not one Loom will write to)")
+                refused.append(f"{name} (not a path Loom will write in this course)")
                 continue
-            write_atomic(target / name, raw)
+            write_atomic(target, raw)
             written += 1
     left = bundle.get("leftOut")
     skipped = bundle.get("skipped") if isinstance(bundle.get("skipped"), list) else []

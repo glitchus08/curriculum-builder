@@ -3450,3 +3450,163 @@ class AnOlderConflictIsNotForgotten(unittest.TestCase):
         live = rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements") or []
         self.assertIn("role", {d.get("aspect") for d in live},
                       "one run not repeating a conflict does not settle it")
+
+
+class ADecisionIsNeverOverwrittenByItsOwnDerivedState(unittest.TestCase):
+    """Two DIFFERENT questions could both report success while only the first survived.
+
+    The merge that rebuilds the views a decision feeds used to run AFTER the transaction: read the record again,
+    merge, write. Anything saved by someone else between that read and that write was overwritten by a record
+    that predated it, and both callers were told they had succeeded.
+    """
+
+    def _ready(self):
+        f, cid, rec = begin("two-questions")
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no", role_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        wait(cid)
+        return f, cid, key
+
+    def _send(self, cid, key, dkey, chosen):
+        entry = engine.runner("pipe", cid).load()["stages"]["research"]["attribution"][key]
+        q = next(x for x in engine.open_questions(entry) if x["key"] == dkey)
+        return engine.record_resolution("pipe", cid, key, dkey, {
+            "by": "P", "chosen": chosen, "becauseWords": "w", "reason": "r",
+            "sawEvidence": entry["fingerprint"], "sawRevision": q["revision"]})
+
+    def _state(self, cid, key):
+        rs = engine.runner("pipe", cid).load()["stages"]["research"]
+        return (sorted((rs.get("attributionResolutions") or {}).get(key, {})),
+                [e["question"] for e in rs.get("attributionDecisions") or []])
+
+    def test_two_different_questions_both_survive(self):
+        f, cid, key = self._ready()
+        self.assertEqual(len(engine.open_questions(
+            engine.runner("pipe", cid).load()["stages"]["research"]["attribution"][key])), 2)
+        self._send(cid, key, "identity", "no")
+        self._send(cid, key, "role", "partly")
+        kept, events = self._state(cid, key)
+        self.assertEqual(kept, ["identity", "role"], "neither decision may be lost")
+        self.assertEqual(sorted(events), ["identity", "role"])
+
+    def test_the_views_a_decision_feeds_reflect_both_decisions(self):
+        f, cid, key = self._ready()
+        self._send(cid, key, "identity", "no")
+        self._send(cid, key, "role", "partly")
+        r = engine.runner("pipe", cid).load()
+        att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
+        self.assertEqual({d["about"] for d in att.get("decidedByAPerson") or []}, {"identity", "role"})
+        self.assertFalse(att.get("unresolvedDisagreements"), "and nothing is left looking open")
+
+    def test_overlapping_decisions_on_different_questions_both_survive(self):
+        import threading
+        f, cid, key = self._ready()
+        gate, out = threading.Barrier(2, timeout=15), []
+
+        def go(dkey, chosen):
+            try:
+                gate.wait()
+                out.append(("ok", self._send(cid, key, dkey, chosen)["question"]))
+            except Exception as e:
+                out.append(("refused", type(e).__name__))
+
+        ts = [threading.Thread(target=go, args=a) for a in (("identity", "no"), ("role", "partly"))]
+        for t in ts:
+            t.start()
+        for t in ts:
+            t.join(timeout=30)
+        kept, events = self._state(cid, key)
+        self.assertEqual(sum(1 for k, _ in out if k == "ok"), 2, f"different questions do not conflict: {out}")
+        self.assertEqual(kept, ["identity", "role"], f"and both must be on disk: {out}")
+        self.assertEqual(len(events), 2)
+
+    def test_a_decision_is_still_refused_once_a_run_starts(self):
+        f, cid, key = self._ready()
+        r = engine.runner("pipe", cid).load()
+        r["status"] = "running"
+        engine.runner("pipe", cid).save(r)
+        try:
+            with self.assertRaises(storage.Conflict):
+                self._send(cid, key, "identity", "no")
+            self.assertEqual(self._state(cid, key), ([], []), "and nothing was written")
+        finally:
+            r = engine.runner("pipe", cid).load()
+            r["status"] = "paused"
+            engine.runner("pipe", cid).save(r)
+
+
+class AnArchivedConflictIsStillAConflict(unittest.TestCase):
+    """A conflict vanished once its history was evicted from the twenty-entry index."""
+
+    def _course(self, name):
+        f, cid, rec = begin(name)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        return f, cid, next(iter(rec["stages"]["research"]["attributionHistory"]))
+
+    def test_a_conflict_in_the_archive_is_found_when_the_same_evidence_returns(self):
+        f, cid, key = self._course("archived-conflict")
+        r = engine.runner("pipe", cid).load()
+        rs = r["stages"]["research"]
+        entry = rs["attribution"][key]
+        fp = entry["fingerprint"]
+        # An earlier judgement on THIS evidence carried a conflict, and it has since been archived out of the
+        # inline index, which now holds only judgements made on other evidence.
+        storage.archive_judgements("pipe", cid, key, [dict(entry, runId="run-ancient", verdict="no",
+                                                          unresolvedDisagreements=[
+                                                              {"aspect": "role", "key": "role", "earlier": "no",
+                                                               "later": "yes", "sameEvidence": True,
+                                                               "sameWholeRequest": True, "note": "UNRESOLVED"}])])
+        rs["attributionHistory"][key] = [dict(entry, runId=f"other{i}", fingerprint="OTHER-EVIDENCE")
+                                         for i in range(20)]
+        engine.runner("pipe", cid).save(r)
+
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        cur = rec["stages"]["research"]["attribution"][key]
+        self.assertEqual(cur["fingerprint"], fp, "the run really is back on the same evidence")
+        self.assertIn("role", {d.get("aspect") for d in cur.get("unresolvedDisagreements") or []},
+                      "an archived conflict is not a settled one")
+
+    def test_history_that_cannot_be_read_is_reported_rather_than_read_as_no_conflict(self):
+        f, cid, key = self._course("unreadable-history")
+        import hashlib as _h
+        name = "k" + _h.sha256(str(key).encode()).hexdigest()[:24] + ".jsonl"
+        d = storage.course_dir("pipe", cid) / "attribution-history"
+        d.mkdir(exist_ok=True)
+        (d / name).write_text("this is not a judgement\n", encoding="utf-8")
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        cur = rec["stages"]["research"]["attribution"][key]
+        self.assertTrue(cur.get("historyIncomplete"), "Loom cannot claim there was no earlier disagreement")
+        self.assertIn("not a statement that there was none", cur["historyIncomplete"]["note"])
+
+    def test_a_resolution_still_applies_after_its_history_is_archived(self):
+        f, cid, key = self._course("resolution-after-archive")
+        entry = engine.runner("pipe", cid).load()["stages"]["research"]["attribution"][key]
+        r = engine.runner("pipe", cid).load()
+        rs = r["stages"]["research"]
+        rs["attribution"][key] = dict(entry, unresolvedDisagreements=[
+            {"aspect": "identity", "key": "identity", "earlier": "no", "later": "yes",
+             "sameEvidence": True, "sameWholeRequest": True}])
+        engine.runner("pipe", cid).save(r)
+        q = next(x for x in engine.open_questions(
+            engine.runner("pipe", cid).load()["stages"]["research"]["attribution"][key]) if x["key"] == "identity")
+        engine.record_resolution("pipe", cid, key, "identity", {
+            "by": "P", "chosen": "no", "becauseWords": "w", "reason": "r",
+            "sawEvidence": entry["fingerprint"], "sawRevision": q["revision"]})
+        # Now archive everything and re-read: the decision is still in force.
+        r = engine.runner("pipe", cid).load()
+        storage.archive_judgements("pipe", cid, key, r["stages"]["research"]["attributionHistory"][key])
+        r["stages"]["research"]["attributionHistory"][key] = []
+        engine.runner("pipe", cid).save(r)
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
+        self.assertEqual(att["detail"]["identity_correct"], "no", "a decision is not undone by archiving")

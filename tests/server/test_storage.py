@@ -1,4 +1,5 @@
 """Checks for the course library on disk. Run: python3 -m unittest discover -s tests/server -t ."""
+import hashlib
 import json
 import os
 import tempfile
@@ -476,3 +477,81 @@ class IncompletenessAccumulates(unittest.TestCase):
         new = st.duplicate_course("inc", cid)["id"]
         self.assertIsNone((st.read_engine("inc", new) or {}).get("provenanceIncomplete"))
         self.assertIsNone(st.backup("inc", new)["provenance"].get("alreadyIncomplete"))
+
+
+class NoProvenancePathIsFollowedOutOfTheCourse(unittest.TestCase):
+    """Checking the directory was not enough: a link planted as a LEAF was still opened and appended through."""
+
+    def _course(self, name):
+        cid = st.create_course("leaf", STATE(name), name)["id"]
+        st.write_engine("leaf", cid, {"status": "paused", "stages": {}})
+        return cid
+
+    def _outside(self, name, body=""):
+        p = st.store_dir("leaf").parent / name
+        p.write_text(body, encoding="utf-8")
+        return p
+
+    def test_a_request_is_not_read_through_a_leaf_symlink(self):
+        cid = self._course("readleaf")
+        st.save_request_snapshot("leaf", cid, "real", {"prompt": "mine"})
+        outside = self._outside("outside-read.json", '{"prompt":"NOT part of this course"}')
+        (st.course_dir("leaf", cid) / "requests" / "planted.json").symlink_to(outside)
+        self.assertIsNone(st.read_request_snapshot("leaf", cid, "planted"),
+                          "a link is not this course's request")
+        self.assertEqual(st.read_request_snapshot("leaf", cid, "real")["prompt"], "mine",
+                         "and the real one still reads")
+
+    def test_the_archive_is_not_appended_through_a_leaf_symlink(self):
+        cid = self._course("appendleaf")
+        outside = self._outside("outside-append.jsonl")
+        name = "k" + hashlib.sha256(b"k1").hexdigest()[:24] + ".jsonl"
+        d = st.course_dir("leaf", cid) / "attribution-history"
+        d.mkdir(exist_ok=True)
+        (d / name).symlink_to(outside)
+        with self.assertRaises(st.StoreError):
+            st.archive_judgements("leaf", cid, "k1", [{"runId": "leaked"}])
+        self.assertEqual(outside.read_text(encoding="utf-8"), "", "nothing was written outside the course")
+
+    def test_a_request_is_not_written_through_a_leaf_symlink(self):
+        cid = self._course("writeleaf")
+        outside = self._outside("outside-write.json", "{}")
+        d = st.course_dir("leaf", cid) / "requests"
+        d.mkdir(exist_ok=True)
+        (d / "abc123.json").symlink_to(outside)
+        with self.assertRaises(st.StoreError):
+            st.save_request_snapshot("leaf", cid, "abc123", {"prompt": "must not land outside"})
+        self.assertEqual(outside.read_text(encoding="utf-8"), "{}")
+
+    def test_an_archive_behind_a_leaf_symlink_reads_as_nothing_rather_than_as_outside_content(self):
+        cid = self._course("readarchleaf")
+        outside = self._outside("outside-arch.jsonl", '{"runId":"not ours"}\n')
+        name = "k" + hashlib.sha256(b"k2").hexdigest()[:24] + ".jsonl"
+        d = st.course_dir("leaf", cid) / "attribution-history"
+        d.mkdir(exist_ok=True)
+        (d / name).symlink_to(outside)
+        self.assertEqual(st.read_archived_judgements("leaf", cid, "k2"), [])
+
+    def test_a_directory_in_place_of_a_provenance_file_is_refused(self):
+        cid = self._course("dirfile")
+        d = st.course_dir("leaf", cid) / "requests"
+        d.mkdir(exist_ok=True)
+        (d / "abc123.json").mkdir()
+        with self.assertRaises(st.StoreError):
+            st.save_request_snapshot("leaf", cid, "abc123", {"prompt": "no"})
+        self.assertIsNone(st.read_request_snapshot("leaf", cid, "abc123"))
+
+    def test_a_restore_will_not_write_through_a_planted_leaf_link(self):
+        cid = self._course("restoreleaf")
+        outside = self._outside("outside-restore.json", "{}")
+        d = st.course_dir("leaf", cid) / "requests"
+        d.mkdir(exist_ok=True)
+        (d / "ok.json").symlink_to(outside)
+        b = st.backup("leaf", cid)
+        b["provenance"] = {"requests": [{"file": "ok.json", "raw": '{"prompt":"planted"}'}],
+                           "judgements": [], "leftOut": 0}
+        new = st.restore("leaf", b)["id"]
+        self.assertEqual(outside.read_text(encoding="utf-8"), "{}", "the original course's link was not written")
+        got = st.course_dir("leaf", new) / "requests" / "ok.json"
+        self.assertTrue(got.is_file() and not got.is_symlink(), "the restored course got its own real file")
+        self.assertIn("planted", got.read_text(encoding="utf-8"))
