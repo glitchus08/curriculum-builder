@@ -2691,3 +2691,151 @@ class DisagreementIsDetectedQuestionByQuestion(unittest.TestCase):
         self.assertFalse(cur.get("unresolvedDisagreements"), "a complete decision on this evidence settles it")
         self.assertTrue(cur.get("resolvedDisagreements"), "and what was decided is kept, not erased")
         self.assertEqual(cur["resolvedDisagreements"][0]["resolvedBy"]["by"], "A Person")
+
+
+class EveryClaimReachesTheReviewer(unittest.TestCase):
+    """What a reviewer was not shown is not the same as what a document does not say.
+
+    The passage builder kept only the first three relationships per source while `lineage_given` still listed them
+    all, and the judge rules said to answer "no" where no passage was shown. On the acceptance course S3, S14, S15
+    and S30 claim 4 relationships each and S108 claims 9, so exactly 10 entries sat in that gap: Loom declined to
+    show them and the rules invited the reviewer to record them as absent from the document.
+    """
+
+    def _src(self, n, words):
+        return {"id": "S108", "url": "https://e.org/p",
+                "lineage": [{"relation": "extended", "earlier_work": f"work number {i}",
+                             "supporting_words": words[i]} for i in range(n)]}
+
+    def _text(self, parts):
+        out, filler = [], "filler of no interest here. " * 30
+        for w in parts:
+            out.append(filler + w)
+        return " ".join(out) + filler
+
+    def test_all_nine_relationships_are_covered_not_only_the_first_three(self):
+        from loom_server import prompts
+        words = [f"this work extends the specification numbered {i} in several respects" for i in range(9)]
+        got = prompts.attribution_reviewer_input(self._src(9, words), self._text(words))[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertEqual(len(got), 9, "every claimed relationship gets an entry")
+        self.assertTrue(all(g["inspected"] for g in got), "and every one of them was actually looked up")
+        self.assertTrue(all(g["found_in_retrieved_text"] for g in got))
+        for i, g in enumerate(got):
+            self.assertIn(words[i], g["passage"], f"relationship {i} is shown its own words")
+
+    def test_the_whole_set_of_passages_stays_within_a_bounded_budget(self):
+        from loom_server import prompts
+        words = [f"this work extends the specification numbered {i} in several respects" for i in range(9)]
+        got = prompts.attribution_reviewer_input(self._src(9, words), self._text(words))[
+            "the_passages_that_show_each_claimed_relationship"]
+        total = sum(len(g["passage"] or "") for g in got)
+        self.assertLessEqual(total, prompts._RELATION_PASSAGE_BUDGET + 9 * 80,
+                             "covering them all must not let one citing page run away with the request")
+
+    def test_what_was_not_looked_up_says_so_and_is_not_read_as_absent(self):
+        """The one case where a claim still cannot be shown: so many that no window is big enough to judge from."""
+        from loom_server import prompts
+        n = 40
+        words = [f"this work extends the specification numbered {i} in several respects" for i in range(n)]
+        got = prompts.attribution_reviewer_input(self._src(n, words), self._text(words))[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertEqual(len(got), n, "nothing is dropped from the list, whatever the budget")
+        skipped = [g for g in got if not g["inspected"]]
+        self.assertTrue(skipped, "with 40 claims some cannot be shown")
+        for g in skipped:
+            self.assertIsNone(g["found_in_retrieved_text"], "not inspected is neither found nor not found")
+            self.assertIn("NOT INSPECTED", g["note"])
+            self.assertIn("cannot_tell", g["note"], "the reviewer is told what to answer")
+            self.assertIn("Do NOT answer 'no'", g["note"], "and told what an omission is not")
+
+    def test_a_claim_loom_could_not_find_is_still_distinguished_from_one_it_did_not_look_for(self):
+        from loom_server import prompts
+        words = ["this work extends the specification numbered 0 in several respects",
+                 "a sentence that appears nowhere in the retrieved document at all"]
+        got = prompts.attribution_reviewer_input(self._src(2, words), self._text(words[:1]))[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertEqual([g["inspected"] for g in got], [True, True])
+        self.assertEqual([g["found_in_retrieved_text"] for g in got], [True, False])
+        self.assertIn("NOT found", got[1]["note"])
+        self.assertNotIn("NOT INSPECTED", got[1]["note"], "Loom did look: it is absent, not unexamined")
+
+    def test_the_rules_never_tell_the_reviewer_to_read_an_omission_as_a_denial(self):
+        from loom_server import prompts
+        p, _ = prompts.attribution_review({"topics": ["t"], "outcome": "o"}, {"nodes": []}, [], {})
+        self.assertIn("Answer 'cannot_tell' where 'inspected' is false", p)
+        self.assertIn("it is NOT a statement that the document lacks it", p)
+
+
+class TheIdentityEvidenceIsShown(unittest.TestCase):
+    """Identity was judged without the words the identity was read from.
+
+    `identityRead.wordsThatShowIt` is the one field that bears directly on who made the work, and it never reached
+    the reviewer: identity rested on the opening of the document, the window around the claim's quotation, and
+    whatever a relationship passage happened to include.
+    """
+
+    def test_the_words_the_identity_was_read_from_reach_the_reviewer(self):
+        from loom_server import prompts
+        words = "This report was prepared by Ada Ito of the Institute for Measurement"
+        text = ("filler of no interest. " * 300) + words + (" and the report continues. " * 20)
+        s_ = {"id": "S1", "url": "https://e.org/p", "directHead": text[:1200], "directExcerpt": "unrelated",
+              "identityRead": {"wordsThatShowIt": words}}
+        got = prompts.attribution_reviewer_input(s_, text)["the_passage_the_identity_was_read_from"]
+        self.assertTrue(got["found_in_retrieved_text"])
+        self.assertIn(words, got["passage"])
+        self.assertEqual(got["character_offset_in_the_document"], text.index(words))
+
+    def test_an_identity_resting_on_words_not_in_the_document_says_so(self):
+        from loom_server import prompts
+        s_ = {"id": "S1", "url": "https://e.org/p", "identityRead": {"wordsThatShowIt": "written by someone the page never names"}}
+        got = prompts.attribution_reviewer_input(s_, "the document says something else entirely " * 20)
+        self.assertFalse(got["the_passage_the_identity_was_read_from"]["found_in_retrieved_text"])
+        self.assertIn("does not rest on anything Loom can show you",
+                      got["the_passage_the_identity_was_read_from"]["note"])
+
+    def test_the_identity_evidence_is_covered_by_the_fingerprint_like_everything_else_shown(self):
+        from loom_server.engine import content_print, attribution_material
+        text = "written by Ada Ito of the Institute for Measurement, and the report continues at some length here"
+        base = {"id": "S1", "url": "https://e.org/p", "identityRead": {"wordsThatShowIt": "written by Ada Ito of the Institute"}}
+        before = content_print(attribution_material(base, text))
+        changed = {"id": "S1", "url": "https://e.org/p", "identityRead": {"wordsThatShowIt": "of the Institute for Measurement"}}
+        self.assertNotEqual(content_print(attribution_material(changed, text)), before,
+                            "a field shown to the reviewer must move the fingerprint")
+
+
+class AQuoteIsNotAMeaning(unittest.TestCase):
+    """A passage can contain the quoted words and still not support the relationship claimed.
+
+    The rule said a relationship whose passage shows the words is 'yes'. Finding the words is where judging starts.
+    The S3 case on the acceptance course is the live example: the words support an acknowledgement of an
+    open-source teaching curriculum, while the identifier recorded beside them is a journal paper about lessons
+    learned. The quotation is genuine and the relationship it is offered for is the wrong one.
+    """
+
+    def _rules(self):
+        from loom_server import prompts
+        return prompts.attribution_review({"topics": ["t"], "outcome": "o"}, {"nodes": []}, [], {})[0]
+
+    def test_the_rules_require_the_relation_itself_not_merely_the_words(self):
+        p = self._rules()
+        self.assertIn("FINDING THE WORDS IS WHERE YOU START, NOT WHERE YOU FINISH", p)
+        self.assertNotIn("A relationship whose passage shows the words is 'yes'", p, "the old rule is gone")
+
+    def test_the_rules_name_relation_direction_chronology_and_the_right_work(self):
+        p = self._rules()
+        for needed in ("(1) RELATION", "(2) DIRECTION", "(3) CHRONOLOGY", "(4) THE RIGHT WORK"):
+            self.assertIn(needed, p, needed)
+
+    def test_a_citation_or_a_see_also_is_named_as_not_being_descent(self):
+        p = self._rules()
+        self.assertIn("see also", p.lower())
+        self.assertIn("reading list", p.lower())
+
+    def test_the_reverse_direction_is_named_as_a_different_claim(self):
+        self.assertIn("was later extended by", self._rules(), "the opposite direction is spelled out")
+
+    def test_a_curriculum_offered_for_a_paper_is_named_as_the_wrong_work(self):
+        p = self._rules()
+        self.assertIn("curriculum", p.lower())
+        self.assertIn("even when the words match exactly", p)

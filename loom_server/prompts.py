@@ -1067,9 +1067,10 @@ def identity_extraction(pages: list) -> tuple[str, dict]:
 # request that produced it had changed. Anything added here is therefore automatically covered by the fingerprint.
 # Bump the version whenever the shape changes, so verdicts judged on an older representation are not treated as
 # describing this one.
-REVIEWER_INPUT_VERSION = 2
-_RELATION_WINDOW = 400      # characters kept around each relationship quotation found in the retrieved text
-_MAX_RELATION_PASSAGES = 3  # per source, so one heavily-citing page cannot run away with the request
+REVIEWER_INPUT_VERSION = 3
+_RELATION_WINDOW = 400          # the most text kept around one relationship quotation
+_RELATION_WINDOW_MIN = 200      # below this a passage is too short to judge a relationship from
+_RELATION_PASSAGE_BUDGET = 2400 # the most text ALL of one source's relationship passages may take together
 
 
 def _relationship_passages(s: dict, text: str | None) -> list:
@@ -1081,26 +1082,78 @@ def _relationship_passages(s: dict, text: str | None) -> list:
     without being shown the words. Each claimed relationship now carries the passage it was read from, bounded, with
     its offset, and says plainly when the quotation cannot be found in the retrieved text at all.
     """
-    out = []
     body = text or ""
-    for rel in (s.get("lineage") or [])[:_MAX_RELATION_PASSAGES]:
-        if not isinstance(rel, dict):
-            continue
+    rels = [r for r in (s.get("lineage") or []) if isinstance(r, dict)]
+    if not rels:
+        return []
+    # EVERY claimed relationship gets an entry. Keeping only the first three left the rest invisible to the
+    # passage builder while `lineage_given` still listed them, and the judge rules told the reviewer to answer
+    # "no" where no passage was shown — so a relationship Loom had simply declined to show was read as a
+    # relationship the document does not state. Ten entries on the acceptance course sat in that gap.
+    #
+    # The budget is kept by sharing it out rather than by dropping claims: the more relationships a page states,
+    # the smaller each window, down to a floor below which a passage cannot be judged at all. Only past that
+    # floor is anything left uninspected, and then it says so in those words.
+    window = max(_RELATION_WINDOW_MIN, min(_RELATION_WINDOW, _RELATION_PASSAGE_BUDGET // len(rels)))
+    room = max(1, _RELATION_PASSAGE_BUDGET // window)
+    found = []
+    for i, rel in enumerate(rels):
         words = str(rel.get("supporting_words") or "").strip()
+        found.append((i, rel, words, _find_flat(words, body) if words else -1))
+    # Where there is not room for all of them, the ones whose words are actually in the retrieved text are shown
+    # first, because those are the ones a reviewer can decide. Order is otherwise as the document claimed them.
+    order = sorted(range(len(found)), key=lambda i: (found[i][3] < 0, i))
+    inspect = set(order[:room])
+    out = []
+    for i, rel, words, at in found:
         entry = {"relation": rel.get("relation"), "earlier_work": rel.get("earlier_work"), "words_claimed": words[:300]}
-        at = _find_flat(words, body) if words else -1
-        if at < 0:
+        if i not in inspect:
+            entry["inspected"] = False
+            entry["found_in_retrieved_text"] = None
+            entry["passage"] = None
+            entry["note"] = (f"NOT INSPECTED. Loom did not look this one up in this request: this page claims "
+                             f"{len(rels)} relationships and the request shows at most {room}. This says NOTHING "
+                             f"about whether the document states it. Answer 'cannot_tell' for this relationship. "
+                             f"Do NOT answer 'no': you have not been shown the evidence either way.")
+        elif at < 0:
+            entry["inspected"] = True
             entry["found_in_retrieved_text"] = False
             entry["passage"] = None
             entry["note"] = ("These words were NOT found in the text Loom retrieved. Judge the relationship on that: "
                              "do not assume the passage exists somewhere Loom did not keep.")
         else:
-            start = max(0, at - _RELATION_WINDOW // 2)
+            start = max(0, at - window // 2)
+            entry["inspected"] = True
             entry["found_in_retrieved_text"] = True
             entry["character_offset_in_the_document"] = at
-            entry["passage"] = body[start:at + len(words) + _RELATION_WINDOW // 2]
+            entry["passage"] = body[start:at + len(words) + window // 2]
         out.append(entry)
     return out
+
+
+def _identity_passage(s: dict, text: str | None) -> dict | None:
+    """The retrieved words the identity reading itself rested on, located in the document.
+
+    Identity was judged from the opening of the document and the window around the claim's quotation, and from
+    whatever a relationship passage happened to show. The words the identity read was actually taken from —
+    `identityRead.wordsThatShowIt` — never reached the reviewer, so the one piece of evidence that bears directly
+    on "who made this" was the piece left out.
+    """
+    words = str(((s.get("identityRead") or {}) if isinstance(s.get("identityRead"), dict) else {}).get("wordsThatShowIt") or "").strip()
+    if not words:
+        return None
+    body = text or ""
+    at = _find_flat(words, body)
+    got = {"words_claimed": words[:300]}
+    if at < 0:
+        got.update(found_in_retrieved_text=False, passage=None,
+                   note=("These words were NOT found in the text Loom retrieved, so the identity recorded for this "
+                         "source does not rest on anything Loom can show you."))
+    else:
+        start = max(0, at - _RELATION_WINDOW // 2)
+        got.update(found_in_retrieved_text=True, character_offset_in_the_document=at,
+                   passage=body[start:at + len(words) + _RELATION_WINDOW // 2])
+    return got
 
 
 def _find_flat(needle: str, hay: str) -> int:
@@ -1137,6 +1190,7 @@ def attribution_reviewer_input(s: dict, text: str | None = None) -> dict:
             "the_start_of_the_document_loom_retrieved": (s.get("directHead") or "")[:1200] or None,
             "the_passage_around_the_quotation": (s.get("directExcerpt") or "")[:500],
             "the_passages_that_show_each_claimed_relationship": _relationship_passages(s, text) or None,
+            "the_passage_the_identity_was_read_from": _identity_passage(s, text),
             "the_quote_recorded_for_this_claim": s.get("quote"),
             "the_quote_was_found_verbatim": d.get("quoteVerbatim"),
             "the_quote_matched_case_for_case": d.get("quoteCaseExact"),
@@ -1152,10 +1206,17 @@ def attribution_review(brief: dict, m: dict, sources: list, texts: dict | None =
         "ROLE: You are an independent reviewer of attribution and lineage. You did not do this research. TASK: For each source, judge whether the authorship, date, version and role recorded for it are correct, and whether each claimed lineage relationship is supported by the words shown. Be direct.",
         block("brief", {"topics": brief.get("topics"), "outcome": brief.get("outcome")}), block("map", map_digest(m, ("required", "optional"))), block("sources", digest),
         "JUDGE\n"
-        "- identity_correct: is the author a real author or creator (not just the host)? Are date and version plausible from what is shown? cannot_tell if the shown text does not settle it.\n"
+        "- identity_correct: is the author a real author or creator (not just the host)? Are date and version plausible from what is shown? Judge it FIRST on 'the_passage_the_identity_was_read_from', which is the text the recorded identity was actually taken from; the opening of the document is also shown. Where that passage is absent, or found_in_retrieved_text is false, the identity rests on nothing Loom retrieved: that is 'cannot_tell' at best, and 'no' where the retrieved text says otherwise. cannot_tell if the shown text does not settle it.\n"
         "- role_correct: original_contribution only where the source is the first publication or documentation of the idea, by its authors. A tutorial, summary, blog or encyclopedia is secondary_aid. Current documentation is official_documentation. Do not accept a role from the site's name.\n"
-        "- relationships: judge EACH claimed relationship separately and return one entry per entry in 'lineage_given', echoing its earlier_work and relation so it can be matched. A relationship whose passage shows the words is 'yes' EVEN IF another relationship on the same source is weak: one unevidenced claim on a page does not make the others unevidenced. Where a relationship has no passage, or its words are not in the retrieved text, say 'no'.\n- lineage_supported: the overall summary for the source. Is each claimed relationship (introduced, extended, corrected...) shown by the words given? none_claimed when the source claims none. Each claimed relationship carries its own passage under 'the_passages_that_show_each_claimed_relationship', taken from the retrieved document at the offset given, so judge it on THAT passage first; the opening of the document and the passage around the quotation are also shown. A heading, a date or a line naming the earlier work counts as words on the page. Where a relationship says found_in_retrieved_text is false, the words claimed for it are NOT in the text Loom kept: that is a 'no' or at best 'cannot_tell', never a yes. Say cannot_tell only when the text shown really does not settle it.\n"
+        "- relationships: judge EACH claimed relationship separately and return one entry per entry in 'lineage_given', echoing its earlier_work and relation so it can be matched. One unevidenced claim on a page does not make the others unevidenced: judge each on its own passage.\n"
+        "  FINDING THE WORDS IS WHERE YOU START, NOT WHERE YOU FINISH. A passage can contain the quoted words and still not support the relationship claimed. Before answering 'yes', all four must hold, from the passage itself:\n"
+        "   (1) RELATION: the passage asserts THIS relation. 'extended' needs the later work to build on the earlier one; 'corrected' needs it to fix or contradict something in the earlier one; 'replicated' needs it to repeat the earlier work and report what came out. A citation, a 'see also', a reading list or a line merely naming the earlier work is NOT any of these.\n"
+        "   (2) DIRECTION: the passage must say THIS source does it TO the earlier work. 'Our method was later extended by Okafor' is the opposite direction and is not this claim.\n"
+        "   (3) CHRONOLOGY: the earlier work must actually be the earlier one. A work this source predates cannot be a work it extends or corrects.\n"
+        "   (4) THE RIGHT WORK: the passage must be about the work named in earlier_work, not a different work by the same people, a different edition, or a project of the same name. Where the passage names a curriculum, a toolkit or a website and earlier_work names a paper — or the other way round — that is 'no', even when the words match exactly.\n"
+        "  Answer 'partly' where the passage supports a weaker version of the claim than the one recorded. Answer 'no' where the passage is shown and does not support it, or where found_in_retrieved_text is false.\n"
+        "  Answer 'cannot_tell' where 'inspected' is false. That means Loom did not show you this one in this request; it is NOT a statement that the document lacks it, and answering 'no' there would record an absence nobody has checked.\n- lineage_supported: the overall summary for the source. Is each claimed relationship (introduced, extended, corrected...) shown by the words given? none_claimed when the source claims none. Each claimed relationship carries its own passage under 'the_passages_that_show_each_claimed_relationship', taken from the retrieved document at the offset given, so judge it on THAT passage first; the opening of the document and the passage around the quotation are also shown. A heading, a date or a line naming the earlier work counts as words on the page. Where a relationship says found_in_retrieved_text is false, the words claimed for it are NOT in the text Loom kept: that is a 'no' or at best 'cannot_tell', never a yes. Say cannot_tell only when the text shown really does not settle it.\n"
         "- 'origin_unknown': topics whose original source has not been found. 'disputed_or_branching': ideas with several origins or a disputed one. 'current_relevance_concerns': where the original is out of date or was corrected.\n"
-        "WHICH FIELDS ARE THE DOCUMENT AND WHICH ARE NOT. Text Loom retrieved from the page itself is in 'the_start_of_the_document_loom_retrieved', 'the_passage_around_the_quotation' and the 'passage' of each entry under 'the_passages_that_show_each_claimed_relationship'. Those are the only fields that are the document. 'tool_summary' is a summary made by a tool and is NOT the original: never treat it as the document or as evidence for a claim. Everything ending in '_given' is what the research recorded and is exactly what you are checking, not evidence. You cannot open pages yourself.",
+        "WHICH FIELDS ARE THE DOCUMENT AND WHICH ARE NOT. Text Loom retrieved from the page itself is in 'the_start_of_the_document_loom_retrieved', 'the_passage_around_the_quotation', 'the_passage_the_identity_was_read_from' and the 'passage' of each entry under 'the_passages_that_show_each_claimed_relationship'. Those are the only fields that are the document. 'tool_summary' is a summary made by a tool and is NOT the original: never treat it as the document or as evidence for a claim. Everything ending in '_given' is what the research recorded and is exactly what you are checking, not evidence. You cannot open pages yourself.",
     ])
     return p, ATTRIBUTION_SCHEMA
