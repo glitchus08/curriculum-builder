@@ -37,6 +37,7 @@ TIMEOUT = {"research": 20 * 60, "outline": 30 * 60, "materials": 25 * 60, "revie
            "attribution_review": 12 * 60, "identity": 12 * 60, "lineage": 12 * 60, "endpoints": 12 * 60, "map": 10 * 60, "foundation_review": 10 * 60, "source_review": 12 * 60, "outline_review": 10 * 60, "project": 25 * 60}
 TURNS = {"research": 40, "outline": 4, "materials": 4, "review": 4, "edit": 4, "ideas": 30,
          "attribution_review": 4, "identity": 4, "lineage": 4, "endpoints": 4, "map": 4, "foundation_review": 4, "source_review": 4, "outline_review": 4, "project": 4}
+_HISTORY_INDEX_KEEP = 20  # judgements kept inline per source; older ones move to the durable archive, never away
 AUTO_REVISE_ROUNDS = 1  # how many times Loom sends an outline back by itself after its reviewer finds a must-fix. Then the problem is shown, not hidden.
 TARGETED_RESEARCH_ROUNDS = 1
 EXCERPT_KEEP = 1500     # characters of what a fetch returned that are kept with each source
@@ -538,6 +539,39 @@ def _build_id() -> str:
         return "unknown"
 
 
+def _execution_provenance() -> dict:
+    """The build that is actually RUNNING, and whether the files on disk have moved on since it started.
+
+    `BUILD` is fixed when the server imports, so it describes the code in memory. Hashing the files again at the
+    moment a judgement is made describes something else: what is on disk now, which is what the NEXT start would
+    load. Recording only one of them lets a judgement claim a build it was not produced by. Both are kept, and
+    where they differ that is said in the record rather than left for someone to work out.
+    """
+    running = _build_id()
+    try:
+        from .http_api import build_id
+        on_disk = build_id()
+    except Exception:
+        on_disk = "unknown"
+    got = {"build": running, "buildOfFilesOnDiskNow": on_disk, "filesChangedSinceStart": running != on_disk}
+    if got["filesChangedSinceStart"]:
+        got["note"] = ("The files on disk are not the ones running. This judgement was produced by the running "
+                       "build; a restart would load something else.")
+    return got
+
+
+def request_settings() -> dict:
+    """The execution configuration a judgement was produced under.
+
+    Two runs can be given the same evidence, the same prompt and the same schema and still be different asks: a
+    different model answers differently, and so does a different reasoning effort or a shorter turn limit. None of
+    this was in the fingerprint, so runs made under different settings compared as identical requests.
+    """
+    cfg = config()
+    return {"model": cfg.get("model") or "the tool's own default", "effort": cfg.get("effort") or "",
+            "testDouble": bool(os.environ.get("LOOM_CLAUDE_BIN"))}
+
+
 def attribution_material(s: dict, text: str | None = None) -> dict:
     """Exactly what an attribution verdict was judged against, for one source.
 
@@ -552,7 +586,9 @@ def attribution_material(s: dict, text: str | None = None) -> dict:
     describe the request. It is per source, so one changed source does not throw away every other verdict, but note
     that the batch request as a whole still changes: `attributionReview.inputFingerprint` records that separately.
     """
-    return dict(prompts.attribution_reviewer_input(s, text), url=norm_url(s.get("url", "")))
+    # No override here any more: the one representation normalises the address itself, so the reviewer and the
+    # fingerprint cannot see two different spellings of it.
+    return prompts.attribution_reviewer_input(s, text)
 
 
 def _project_assets(u: dict) -> list:
@@ -1606,10 +1642,20 @@ class Runner:
         material = [attribution_material(s_, texts.get(s_.get("id"))) for s_ in srcs]
         batch_print = content_print(material)
         p, schema = prompts.attribution_review(rec["brief"], rec["stages"]["map"]["output"], srcs, texts)
-        # The whole request, not just the evidence in it. The sources digest alone is not the request: the judge
-        # rules and the answer schema are part of what was asked, and changing either can move a verdict without
-        # touching a single source. Comparing two runs is only a controlled comparison when THIS matches.
-        request_print = content_print([p, schema])
+        # The whole request, not just the evidence in it, and not just the part of it this stage writes. The
+        # sources digest alone is not the request: the judge rules, the answer schema, the system text every call
+        # carries, and the settings the model runs under are all part of what was asked, and changing any of them
+        # can move a verdict without touching a single source. `[p, schema]` left out prompts.SYSTEM and the
+        # effective configuration, so two runs under different settings compared as the identical request.
+        settings = request_settings()
+        request = {"prompt": p, "schema": schema, "system": prompts.SYSTEM, "settings": settings}
+        request_print = content_print(request)
+        execution = _execution_provenance()
+        # The request itself, kept once under its own fingerprint. A hash can say two runs differed; only the
+        # request can say how. Replaying or inspecting an old ask needs the ask, not a digest of it.
+        snapshot = storage.save_request_snapshot(self.store, self.cid, request_print, dict(
+            request, at=storage.now_iso(), stage="attribution_review", requestFingerprint=request_print,
+            reviewerInputVersion=prompts.REVIEWER_INPUT_VERSION, sourcesInRequest=len(srcs), **execution))
         r = self.call(rec, "attribution_review", "attribution_review", "A separate check of who made each source and how they connect", p, schema)
         out = r["output"]
         ids = {s_["id"]: s_ for s_ in srcs}
@@ -1620,10 +1666,17 @@ class Runner:
         resolutions = rs.setdefault("attributionResolutions", {})
         run_id = secrets.token_hex(8)
         # What produced this run, kept with it, so a later disagreement can be read against what actually differed.
+        # Three different questions, kept apart because they are answered differently. Equal EVIDENCE is
+        # `batchInputFingerprint` and the per-source `fingerprint`. Equal REQUEST is `requestFingerprint`: the
+        # same evidence asked the same way. Equal EXECUTION is `settingsFingerprint` with the build: the same
+        # request run by the same code under the same configuration. Two runs can match on one and differ on the
+        # next, and reading a difference as being about the model needs all three to have held.
         provenance = {"runId": run_id, "at": storage.now_iso(), "model": r["model"], "stage": "attribution_review",
                       "batchInputFingerprint": batch_print, "requestFingerprint": request_print,
+                      "settingsFingerprint": content_print(settings), "settings": settings,
+                      "requestSnapshot": snapshot,
                       "promptCharacters": len(p), "sourcesInRequest": len(srcs),
-                      "reviewerInputVersion": prompts.REVIEWER_INPUT_VERSION, "build": _build_id()}
+                      "reviewerInputVersion": prompts.REVIEWER_INPUT_VERSION, **execution}
 
         def answers_in(entry):
             """Every question one judgement answered, keyed so two runs can be compared question by question.
@@ -1718,7 +1771,17 @@ class Runner:
                                                     "earlierAt": agg.get("earlierAt"), "sameEvidence": True,
                                                     "sameWholeRequest": agg.get("sameWholeRequest"), "note": agg.get("note")}
             past.append(dict(entry, runId=run_id, provenance=provenance))
-            del past[:-20]
+            # Nothing is destroyed. `del past[:-20]` quietly dropped every judgement older than the last twenty,
+            # while the rule written above this method says every one is kept. What leaves the working index is
+            # appended to a durable file beside the course first, and the index says how many went and where.
+            if len(past) > _HISTORY_INDEX_KEEP:
+                leaving, past[:] = past[:-_HISTORY_INDEX_KEEP], past[-_HISTORY_INDEX_KEEP:]
+                where = storage.archive_judgements(self.store, self.cid, claim_key, leaving)
+                moved = rs.setdefault("attributionHistoryArchived", {}).setdefault(claim_key, {"count": 0, "file": where})
+                moved["count"] += len(leaving)
+                moved["file"] = where or moved.get("file")
+                moved["note"] = ("Older judgements for this source are kept in full beside the course, not in "
+                                 "this file. None has been deleted.")
             return entry
 
         for v in out.get("sources") or []:

@@ -1179,9 +1179,13 @@ def _find_flat(needle: str, hay: str) -> int:
 
 def attribution_reviewer_input(s: dict, text: str | None = None) -> dict:
     """Exactly what the attribution reviewer sees for one source, and exactly what its verdict is judged against."""
+    from . import pipeline  # imported here: pipeline does not import this module, so there is no cycle
     d = s.get("directRetrieval") or {}
+    # ONE spelling of the address, for the reviewer and for the fingerprint alike. The reviewer used to be shown
+    # the raw URL while the fingerprint covered the normalised one, so `https://E.org/a/` and `https://e.org/a`
+    # were the same record and two different requests — a small hole in "exactly one representation", but a hole.
     return {"reviewerInputVersion": REVIEWER_INPUT_VERSION,
-            "id": s.get("id"), "title": s.get("title"), "url": s.get("url"),
+            "id": s.get("id"), "title": s.get("title"), "url": pipeline.norm_url(str(s.get("url") or "")),
             "authors_given": s.get("authors"), "published_given": s.get("published"),
             "version_given": s.get("version_or_edition"), "identifier_given": s.get("identifier"),
             "role_given": s.get("role") or "not recorded (an older record)",

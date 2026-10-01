@@ -441,6 +441,74 @@ def write_engine(store, cid: str, rec: dict) -> None:
         write_atomic(engine_path(store, cid), json.dumps(rec, indent=1, ensure_ascii=False))
 
 
+# Durable provenance beside a course. Two directories, both append-only.
+#
+# `requests/` holds one file per DISTINCT request the attribution reviewer was sent — the whole prompt, the answer
+# schema, the system text and the settings in force — so an old judgement can be read back against the exact ask
+# that produced it rather than against a hash of it. A hash says two runs differed; it cannot say how.
+#
+# `attribution-history/` holds judgements that have scrolled out of the working index kept in engine.json. The
+# index was trimmed with `del past[:-20]`, which silently destroyed every judgement older than the last twenty
+# while the written rule said every one is kept. Trimmed entries are now appended here first.
+_FP_RE = re.compile(r"^[a-z0-9]{4,64}(\.[a-z0-9]{1,16})?$")
+
+
+def _fp_name(fingerprint: str) -> str:
+    """A fingerprint as a filename, or a hash of it when it is not one Loom wrote."""
+    t = str(fingerprint or "").strip().lower()
+    return t.replace(".", "-") if _FP_RE.match(t) else "x" + hashlib.sha256(t.encode("utf-8")).hexdigest()[:24]
+
+
+def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> str:
+    """Keep the whole request under its fingerprint, once. Returns the name it was kept under.
+
+    Written once and never rewritten: a snapshot that could be replaced is not a record of what was asked. The
+    same request made by a hundred sources in one batch is one file, because it is one request.
+    """
+    name = _fp_name(fingerprint) + ".json"
+    with LOCK:
+        d = course_dir(store, cid) / "requests"
+        d.mkdir(exist_ok=True)
+        path = d / name
+        if not path.exists():
+            write_atomic(path, json.dumps(payload, indent=1, ensure_ascii=False))
+    return name
+
+
+def read_request_snapshot(store, cid: str, fingerprint: str) -> dict | None:
+    with LOCK:
+        return read_json(course_dir(store, cid) / "requests" / (_fp_name(fingerprint) + ".json"))
+
+
+def archive_judgements(store, cid: str, key: str, entries: list) -> str:
+    """Append judgements leaving the working index to a durable file. Nothing is ever deleted from it."""
+    if not entries:
+        return ""
+    name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
+    with LOCK:
+        d = course_dir(store, cid) / "attribution-history"
+        d.mkdir(exist_ok=True)
+        with (d / name).open("a", encoding="utf-8") as fh:
+            for e in entries:
+                fh.write(json.dumps({"key": key, **e}, ensure_ascii=False) + "\n")
+    return name
+
+
+def read_archived_judgements(store, cid: str, key: str) -> list:
+    name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
+    path = course_dir(store, cid) / "attribution-history" / name
+    if not path.is_file():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            try:
+                out.append(json.loads(line))
+            except ValueError:
+                out.append({"unreadable": line[:200]})
+    return out
+
+
 EXPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(json|html)$")
 EXPORT_MAX = 24 * 1024 * 1024
 

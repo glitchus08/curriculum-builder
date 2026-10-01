@@ -2839,3 +2839,132 @@ class AQuoteIsNotAMeaning(unittest.TestCase):
         p = self._rules()
         self.assertIn("curriculum", p.lower())
         self.assertIn("even when the words match exactly", p)
+
+
+class TheWholeRequestIsRecorded(unittest.TestCase):
+    """A hash can say two runs differed. Only the request can say how.
+
+    `content_print([p, schema])` left out prompts.SYSTEM, which every call carries, and the settings the model
+    runs under, so two runs made under different configuration compared as the identical request. And only
+    hashes and a character count were saved, never the ask itself, so an old judgement could not be read back
+    against what produced it.
+    """
+
+    def _run(self, cid):
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        return wait(cid)
+
+    def test_the_system_text_and_the_settings_are_part_of_the_request_fingerprint(self):
+        from loom_server import prompts, engine as E
+        p, schema = "the prompt", {"a": 1}
+        settings = E.request_settings()
+        full = E.content_print({"prompt": p, "schema": schema, "system": prompts.SYSTEM, "settings": settings})
+        self.assertNotEqual(full, E.content_print([p, schema]), "the old fingerprint covered less than the request")
+        changed = E.content_print({"prompt": p, "schema": schema, "system": prompts.SYSTEM + " and one more rule",
+                                   "settings": settings})
+        self.assertNotEqual(changed, full, "changing the judge's standing instructions changes the request")
+        other = E.content_print({"prompt": p, "schema": schema, "system": prompts.SYSTEM,
+                                 "settings": dict(settings, model="some-other-model")})
+        self.assertNotEqual(other, full, "a different model is a different ask")
+
+    def test_the_whole_request_is_kept_and_can_be_read_back(self):
+        f, cid, rec = begin("request-snapshot")
+        rec = self._run(cid)
+        rs = rec["stages"]["research"]
+        prov = rs["attributionHistory"][next(iter(rs["attributionHistory"]))][-1]["provenance"]
+        self.assertTrue(prov.get("requestSnapshot"), "the run says where its request was kept")
+        got = storage.read_request_snapshot("pipe", cid, prov["requestFingerprint"])
+        self.assertIsNotNone(got, "and the request really is there")
+        for field in ("prompt", "schema", "system", "settings", "requestFingerprint", "sourcesInRequest", "build"):
+            self.assertIn(field, got, field)
+        self.assertEqual(got["requestFingerprint"], prov["requestFingerprint"])
+        self.assertEqual(len(got["prompt"]), prov["promptCharacters"], "the kept prompt is the one that was sent")
+
+    def test_one_request_is_kept_once_however_many_sources_it_judged(self):
+        f, cid, rec = begin("request-snapshot-once")
+        rec = self._run(cid)
+        d = storage.course_dir("pipe", cid) / "requests"
+        self.assertEqual(len(list(d.glob("*.json"))), 1, "a batch is one request, not one per source")
+        self.assertGreater(len(rec["stages"]["research"]["attributionHistory"]), 1, "and it judged several sources")
+
+    def test_a_kept_request_is_never_rewritten(self):
+        f, cid, rec = begin("request-immutable")
+        rec = self._run(cid)
+        rs = rec["stages"]["research"]
+        fp = rs["attributionHistory"][next(iter(rs["attributionHistory"]))][-1]["provenance"]["requestFingerprint"]
+        storage.save_request_snapshot("pipe", cid, fp, {"prompt": "something else entirely"})
+        self.assertNotEqual(storage.read_request_snapshot("pipe", cid, fp)["prompt"], "something else entirely",
+                            "a snapshot that could be replaced is not a record of what was asked")
+
+    def test_equal_evidence_equal_request_and_equal_execution_are_kept_apart(self):
+        f, cid, rec = begin("three-fingerprints")
+        rec = self._run(cid)
+        rs = rec["stages"]["research"]
+        prov = rs["attributionHistory"][next(iter(rs["attributionHistory"]))][-1]["provenance"]
+        for field in ("batchInputFingerprint", "requestFingerprint", "settingsFingerprint", "settings",
+                      "build", "buildOfFilesOnDiskNow", "filesChangedSinceStart"):
+            self.assertIn(field, prov, field)
+        self.assertNotEqual(prov["batchInputFingerprint"], prov["requestFingerprint"],
+                            "the evidence is not the request")
+
+    def test_the_running_build_is_distinguished_from_the_files_on_disk(self):
+        from loom_server import engine as E
+        got = E._execution_provenance()
+        self.assertIn("build", got)
+        self.assertIn("buildOfFilesOnDiskNow", got)
+        self.assertIsInstance(got["filesChangedSinceStart"], bool)
+
+
+class NoJudgementIsEverDeleted(unittest.TestCase):
+    """`del past[:-20]` destroyed every judgement older than the last twenty, under a rule saying every one is kept."""
+
+    def _run(self, cid):
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        return wait(cid)
+
+    def test_judgements_leaving_the_working_index_are_kept_in_full_beside_the_course(self):
+        from loom_server import engine as E
+        f, cid, rec = begin("history-durable")
+        rec = self._run(cid)
+        rs = rec["stages"]["research"]
+        key = next(iter(rs["attributionHistory"]))
+
+        # Push the working index past its limit with judgements that can be told apart afterwards.
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        base = h[-1]
+        h[:] = [dict(base, runId=f"run-{i:03d}", at=f"2026-09-{(i % 28) + 1:02d}T00:00:00Z") for i in range(25)]
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+
+        rs = rec["stages"]["research"]
+        inline = rs["attributionHistory"][key]
+        self.assertLessEqual(len(inline), E._HISTORY_INDEX_KEEP, "the working index stays bounded")
+        moved = rs["attributionHistoryArchived"][key]
+        self.assertGreater(moved["count"], 0, "and says how many left it")
+        archived = storage.read_archived_judgements("pipe", cid, key)
+        self.assertEqual(len(archived), moved["count"], "every one of them is still readable")
+        kept = {e.get("runId") for e in archived} | {e.get("runId") for e in inline}
+        for i in range(25):
+            self.assertIn(f"run-{i:03d}", kept, f"run-{i:03d} was destroyed")
+
+    def test_the_archive_is_appended_to_and_never_rewritten(self):
+        f, cid, rec = begin("history-append")
+        rec = self._run(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        storage.archive_judgements("pipe", cid, key, [{"runId": "first"}])
+        storage.archive_judgements("pipe", cid, key, [{"runId": "second"}])
+        got = [e.get("runId") for e in storage.read_archived_judgements("pipe", cid, key)]
+        self.assertEqual(got, ["first", "second"], "the earlier one is still there")
+
+
+class OneSpellingOfTheAddress(unittest.TestCase):
+    """The reviewer saw the raw URL while the fingerprint covered the normalised one."""
+
+    def test_the_reviewer_and_the_fingerprint_see_the_same_address(self):
+        from loom_server import prompts
+        from loom_server.engine import content_print, attribution_material
+        a, b = {"id": "S1", "url": "https://E.org/a/"}, {"id": "S1", "url": "https://e.org/a"}
+        self.assertEqual(prompts.attribution_reviewer_input(a)["url"], prompts.attribution_reviewer_input(b)["url"])
+        self.assertEqual(content_print(attribution_material(a)), content_print(attribution_material(b)),
+                         "one record, one request: not the same record asked two different ways")
