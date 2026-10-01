@@ -491,3 +491,131 @@ class RelationshipsAreJudgedSeparately(unittest.TestCase):
         detail = {"identity_correct": "yes", "role_correct": "yes", "lineage_supported": "partly", "reason": "older review, no per-relationship detail"}
         built = lineage.build([self._src(rels, detail), self._earlier("rfc8089", "A")])
         self.assertEqual(built["edges"][0]["status"], "unknown", "an older verdict is not promoted by the new field being absent")
+
+
+class IdentityAndRoleMustBeAffirmed(unittest.TestCase):
+    """A question nobody answered is not a question answered favourably.
+
+    The gate used to read `detail.get(field) not in ("yes", None)`, so a MISSING identity or role judgement passed
+    it, and the whole check was skipped whenever the source verdict was already "yes". A relationship could
+    therefore be called supported although no review had ever said who made the source or what kind of source it
+    was. These are fixture-only checks: they say what the rule is, not that any real record was malformed.
+    """
+
+    def _src(self, detail, verdict="partly"):
+        words = "we introduce the method described here"
+        rels = [{"relation": "applied", "earlier_work": "rfc8089", "supporting_words": words, "what_changed": "a", "limits": ""}]
+        return src(id="S81", url="https://example.org/later", identifier="doi:10.5555/later", title="A later work",
+                   role="primary_extension", quote=words,
+                   directExcerpt="we introduce the method described here and give its limits",
+                   lineage=rels, attribution={"verdict": verdict, "detail": detail})
+
+    def _earlier(self):
+        return {"id": "NAMED:rfc8089", "url": "https://example.org/rfc8089", "title": "A", "authors": ["A"],
+                "published": "1998", "identifier": "rfc8089", "role": "original_contribution",
+                "evidenceLevel": "direct_text", "directRetrieval": {"sha256": "e" * 64}, "lineage": []}
+
+    def _edge(self, detail, verdict="partly"):
+        return lineage.build([self._src(detail, verdict), self._earlier()])["edges"][0]
+
+    def test_an_omitted_identity_and_role_do_not_pass_the_gate(self):
+        e = self._edge({"lineage_supported": "yes", "reason": "the words are there",
+                        "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": "yes", "reason": "shown verbatim"}]})
+        self.assertEqual(e["status"], "unknown", "a missing judgement is not an affirmative one")
+        self.assertTrue(any("identity" in w for w in e["why"]), e["why"])
+        self.assertTrue(any("role" in w for w in e["why"]), e["why"])
+
+    def test_the_gate_is_not_skipped_when_the_source_verdict_is_already_yes(self):
+        e = self._edge({"lineage_supported": "yes",
+                        "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": "yes", "reason": "shown verbatim"}]},
+                       verdict="yes")
+        self.assertEqual(e["status"], "unknown", "an aggregate yes does not stand in for the two judgements it is made of")
+
+    def test_cannot_tell_and_an_unrecognised_value_both_fail_closed(self):
+        for got in ("cannot_tell", "", "probably", None):
+            detail = {"identity_correct": got, "role_correct": "yes", "lineage_supported": "yes",
+                      "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": "yes", "reason": "shown verbatim"}]}
+            self.assertEqual(self._edge(detail)["status"], "unknown", f"identity {got!r} must not support an edge")
+
+    def test_both_affirmed_still_supports_the_edge(self):
+        e = self._edge({"identity_correct": "yes", "role_correct": "yes", "lineage_supported": "yes",
+                        "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": "yes", "reason": "shown verbatim"}]})
+        self.assertEqual(e["status"], "supported", "the gate must not reject a judgement that really was made")
+
+
+class AnUnresolvedDisagreementBlocksSupport(unittest.TestCase):
+    """Where two runs answered the same question differently on the same evidence, nobody has decided yet.
+
+    The code recorded the disagreement and then ignored it: a per-relationship "yes" from the latest run produced
+    a supported edge although an earlier run on identical evidence had said no. The latest answer won by being
+    latest, which is the one thing the written rule says must not happen.
+    """
+
+    def _built(self, unresolved, rel_supported="yes"):
+        words = "we introduce the method described here"
+        rels = [{"relation": "applied", "earlier_work": "rfc8089", "supporting_words": words, "what_changed": "a", "limits": ""}]
+        detail = {"identity_correct": "yes", "role_correct": "yes", "lineage_supported": "yes",
+                  "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": rel_supported, "reason": "shown verbatim"}]}
+        s = src(id="S81", url="https://example.org/later", identifier="doi:10.5555/later", title="A later work",
+                role="primary_extension", quote=words,
+                directExcerpt="we introduce the method described here and give its limits", lineage=rels,
+                attribution={"verdict": "yes", "detail": detail, "unresolvedDisagreements": unresolved})
+        earlier = {"id": "NAMED:rfc8089", "url": "https://example.org/rfc8089", "title": "A", "authors": ["A"],
+                   "published": "1998", "identifier": "rfc8089", "role": "original_contribution",
+                   "evidenceLevel": "direct_text", "directRetrieval": {"sha256": "e" * 64}, "lineage": []}
+        return lineage.build([s, earlier])
+
+    def _disagreement(self, aspect, earlier_work=None, relation=None, **kw):
+        d = {"aspect": aspect, "key": lineage.disagreement_key(aspect, earlier_work, relation),
+             "earlier": "no", "later": "yes", "sameEvidence": True, "sameWholeRequest": True}
+        d.update(kw)
+        return d
+
+    def test_a_contradicted_relationship_is_not_supported_by_the_later_answer(self):
+        built = self._built([self._disagreement("relationship", "rfc8089", "applied")])
+        e = built["edges"][0]
+        self.assertEqual(e["status"], "unresolved", "the later answer does not win by being later")
+        self.assertEqual(e["wouldBeWithoutTheDisagreement"], "supported", "what is blocked is recorded, not hidden")
+        self.assertEqual(built["summary"]["supportedEdges"], 0)
+        self.assertEqual(built["summary"]["unresolvedEdges"], 1)
+
+    def test_a_contradiction_about_identity_or_role_blocks_every_edge_from_that_source(self):
+        for aspect in ("identity", "role", "overall", "lineage_supported"):
+            built = self._built([self._disagreement(aspect)])
+            self.assertEqual(built["edges"][0]["status"], "unresolved", f"{aspect} belongs to the source")
+
+    def test_a_contradiction_about_identity_also_stops_the_origin_being_established(self):
+        built = self._built([self._disagreement("identity")])
+        w = next(x for x in built["works"].values() if x.get("identifier") == "doi:10.5555/later")
+        self.assertEqual(w["originStatus"], "unknown", "an origin is not established while its identity is contested")
+        self.assertTrue(w.get("originUnresolved"))
+
+    def test_a_contradiction_about_one_relationship_leaves_the_others_alone(self):
+        built = self._built([self._disagreement("relationship", "pep428", "extended")])
+        self.assertEqual(built["edges"][0]["status"], "supported",
+                         "a contested claim elsewhere on the page is not a reason to throw this one away")
+
+    def test_a_record_of_disagreement_that_cannot_be_read_fails_closed(self):
+        for bad in ("something", [{"not": "a disagreement record"}], [None], 7):
+            self.assertEqual(self._built(bad)["edges"][0]["status"], "unresolved", f"{bad!r} is not a clean record")
+
+    def test_a_disputed_relationship_stays_disputed_rather_than_becoming_unresolved(self):
+        built = self._built([self._disagreement("relationship", "rfc8089", "applied")], rel_supported="no")
+        self.assertEqual(built["edges"][0]["status"], "disputed", "a finding against the claim already stands")
+
+    def test_an_unresolved_edge_is_not_counted_as_a_supported_extension(self):
+        words = "we introduce the method described here"
+        rels = [{"relation": "replicated", "earlier_work": "doi:10.1234/first", "supporting_words": words,
+                 "what_changed": "repeated it", "limits": ""}]
+        detail = {"identity_correct": "yes", "role_correct": "yes", "lineage_supported": "yes",
+                  "relationships": [{"earlier_work": "doi:10.1234/first", "relation": "replicated", "supported": "yes", "reason": "shown"}]}
+        later = src(id="S2", url="https://example.org/later", identifier="doi:10.5555/later", title="A later work",
+                    role="primary_extension", quote=words,
+                    directExcerpt="we introduce the method described here and give its limits", lineage=rels,
+                    attribution={"verdict": "yes", "detail": detail,
+                                 "unresolvedDisagreements": [self._disagreement("relationship", "doi:10.1234/first", "replicated")]})
+        built = lineage.build([src(), later])
+        chain = lineage.chains(built)[0]
+        self.assertEqual(chain["supportedExtensions"], [], "an undecided extension is not a supported one")
+        self.assertEqual(len(chain["awaitingAPersonsDecision"]), 1)
+        self.assertEqual(len(chain["claimedButNotEstablished"]), 1)

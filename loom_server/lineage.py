@@ -23,9 +23,20 @@ RELATIONS = ("introduced", "documented", "extended", "corrected", "replicated", 
 # What each relation says about the EARLIER work. Only these three are claims of descent from an original.
 DESCENT = ("extended", "corrected", "replicated")
 ORIGIN_STATUS = ("established", "unknown", "disputed")
-EDGE_STATUS = ("supported", "unknown", "disputed")
+# `unresolved` is not a weaker kind of support. It says two runs of the review gave different answers to the SAME
+# question on the SAME evidence and nobody has decided between them. Until a person decides on the evidence, the
+# claim has no standing at all: it is not supported, and it is not merely unknown either, because something IS
+# known about it — that the review contradicted itself.
+EDGE_STATUS = ("supported", "unresolved", "unknown", "disputed")
 # Lower is more cautious. A disputed reading of an assertion always wins the merge; above it, better support wins.
-_RANK = {"disputed": 0, "unknown": 1, "supported": 2}
+# An unresolved disagreement sits just above disputed: it outranks both `unknown` and `supported`, so one record
+# of an assertion carrying a live contradiction cannot be covered up by another record that happens to look clean.
+_RANK = {"disputed": 0, "unresolved": 1, "unknown": 2, "supported": 3}
+
+# Aspects of a judgement that belong to the SOURCE, so a contradiction in any of them unsettles every relationship
+# read from that source. A contradiction about one relationship is NOT one of these: it unsettles that
+# relationship alone and leaves the other claims on the same page exactly where they were.
+SOURCE_WIDE_ASPECTS = ("identity", "role", "overall", "lineage_supported")
 
 
 def _norm(t) -> str:
@@ -212,6 +223,14 @@ def work_from_source(s: dict, canonical: dict | None = None) -> dict:
         said = {k: detail.get(k) for k in ("identity_correct", "role_correct")}
         why.append("the attribution review did not affirm both its identity and its role: it recorded "
                    + ", ".join(f"{k.replace('_', ' ')} {v!r}" for k, v in said.items()))
+    # An origin cannot be established while the review contradicts itself about who made the work or what kind of
+    # work it is. This is deliberately not a fourth origin status: the honest reading is that the origin is NOT
+    # established, which is what `unknown` already says. What the extra field adds is why it is unknown — because
+    # a person has to decide, not because nobody has looked.
+    live_identity = [d for d in unresolved_disagreements(s) if d.get("aspect") in SOURCE_WIDE_ASPECTS]
+    if live_identity:
+        why.extend(_disagreement_why(d) for d in live_identity)
+        w["originUnresolved"] = live_identity
     w["originStatus"] = "disputed" if disputed else ("established" if not why else "unknown")
     w["originWhy"] = why
     w["attributionVerdict"] = verdict or "not_judged"
@@ -234,14 +253,16 @@ def merge_works(works: list) -> dict:
         cur = out.get(w["id"])
         if cur is None:
             out[w["id"]] = dict(w, originSightings=[{"status": w.get("originStatus"), "why": list(w.get("originWhy") or []),
-                                                     "verdict": w.get("attributionVerdict"), "fromSources": list(w.get("fromSources") or [])}])
+                                                     "verdict": w.get("attributionVerdict"), "fromSources": list(w.get("fromSources") or []),
+                                                     "unresolved": list(w.get("originUnresolved") or [])}])
             continue
         for k in ("seenAt", "fromSources", "originWhy"):
             cur[k] = list(dict.fromkeys((cur.get(k) or []) + (w.get(k) or [])))
         cur["identityEvidence"] = (cur.get("identityEvidence") or []) + (w.get("identityEvidence") or [])
         cur["originSightings"] = (cur.get("originSightings") or []) + [
             {"status": w.get("originStatus"), "why": list(w.get("originWhy") or []),
-             "verdict": w.get("attributionVerdict"), "fromSources": list(w.get("fromSources") or [])}]
+             "verdict": w.get("attributionVerdict"), "fromSources": list(w.get("fromSources") or []),
+             "unresolved": list(w.get("originUnresolved") or [])}]
         for k in ("title", "creators", "published", "version_or_edition", "identifier"):
             if not cur.get(k) and w.get(k):
                 cur[k] = w[k]
@@ -255,6 +276,15 @@ def merge_works(works: list) -> dict:
             cur["originStatus"] = "disputed"
             cur["originWhy"] = list(dict.fromkeys([r for x in seen if x.get("status") == "disputed" for r in x.get("why") or []]))
             cur["originContrary"] = list(dict.fromkeys([r for x in seen if x.get("status") != "disputed" for r in x.get("why") or []]))
+        elif live := [d for x in seen for d in x.get("unresolved") or []]:
+            # A live contradiction about who made this work, or what kind of work it is, is a finding and not an
+            # absence, so it is not outweighed by another sighting that happened to look clean. Several claims
+            # read from one document are merged into one work here, so the "other sighting" is often the very
+            # same page: letting it establish the origin would settle the contradiction by counting it twice.
+            cur["originStatus"] = "unknown"
+            cur["originUnresolved"] = live
+            cur["originWhy"] = list(dict.fromkeys([r for x in seen if x.get("unresolved") for r in x.get("why") or []]))
+            cur["originContrary"] = list(dict.fromkeys([r for x in seen if not x.get("unresolved") for r in x.get("why") or []]))
         elif "established" in statuses:
             cur["originStatus"] = "established"
             cur["originWhy"] = []
@@ -318,10 +348,94 @@ def edges_from_sources(sources: list, works: dict, texts: dict | None = None, ca
             for w in edge.get("why") or []:
                 if w not in (prior.get("why") or []) and w not in (prior.get("alsoSaid") or []):
                     prior.setdefault("alsoSaid", []).append(w)
-            if _RANK.get(edge["status"], 1) < _RANK.get(prior["status"], 1) or \
-                    (prior["status"] != "disputed" and _RANK.get(edge["status"], 1) > _RANK.get(prior["status"], 1)):
+            if _RANK.get(edge["status"], 2) < _RANK.get(prior["status"], 2) or \
+                    (prior["status"] != "disputed" and _RANK.get(edge["status"], 2) > _RANK.get(prior["status"], 2)):
                 prior.update({k: edge[k] for k in ("status", "why", "fromSource", "whatChanged", "limits")})
+                # The reasons travel with the status they explain. Adopting `unresolved` without the record of
+                # what was contradicted, or dropping that record when a reading moves off `unresolved`, would
+                # leave an edge whose standing nobody can account for.
+                for k in ("unresolvedDisagreements", "wouldBeWithoutTheDisagreement"):
+                    if k in edge:
+                        prior[k] = edge[k]
+                    else:
+                        prior.pop(k, None)
     return out
+
+
+def disagreement_key(aspect: str, earlier_work=None, relation=None) -> str:
+    """One stable name for the thing two runs disagreed about.
+
+    The key is what makes a disagreement survive. Comparing a run only against the run before it lets a
+    contradiction vanish by repetition: answer yes, then no, then no again, and the last two agree, so by the
+    third run nothing looks wrong even though the first two still contradict each other on the same evidence.
+    Carrying unresolved disagreements forward under a stable key closes that, and it is also what a resolution is
+    recorded against, so deciding one question does not silently settle a different one.
+    """
+    if aspect != "relationship":
+        return aspect
+    return "relationship|" + ident_key(earlier_work) + "|" + _norm(relation)
+
+
+def _attribution_of(s: dict) -> dict:
+    """A source's attribution record, or an empty one. A record of the wrong shape tells us nothing."""
+    a = s.get("attribution") if isinstance(s, dict) else None
+    return a if isinstance(a, dict) else {}
+
+
+def unresolved_disagreements(s: dict, edge: dict | None = None) -> list:
+    """The live contradictions that bear on this edge, or on the source's identity when no edge is given.
+
+    Source-wide aspects — identity, role, the overall verdict, whether the page supports descent at all — bear on
+    everything read from that source. A contradiction about ONE relationship bears on that relationship only:
+    unsettling a page's other claims because one of them is contested would throw away evidence that nothing is
+    actually wrong with, which is the opposite of what keeping disagreement is for.
+
+    Anything stored here that cannot be read is treated as a live contradiction rather than as no contradiction.
+    A malformed record is not a clean bill of health.
+    """
+    items = _attribution_of(s).get("unresolvedDisagreements")
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        return [{"aspect": "overall", "key": "overall", "unreadable": True,
+                 "note": "This source carries a record of disagreement that Loom cannot read, so nothing resting "
+                         "on it can be called settled."}]
+    out = []
+    for d in items:
+        if not isinstance(d, dict):
+            out.append({"aspect": "overall", "key": "overall", "unreadable": True,
+                        "note": "This source carries a record of disagreement that Loom cannot read, so nothing "
+                                "resting on it can be called settled."})
+            continue
+        aspect = d.get("aspect")
+        if aspect in SOURCE_WIDE_ASPECTS:
+            out.append(d)
+        elif aspect == "relationship":
+            if edge is None:
+                continue
+            if d.get("key") == disagreement_key("relationship", edge.get("earlierWorkAsNamed"), edge.get("relation")):
+                out.append(d)
+        else:
+            # An aspect from a newer build, or a damaged one. Loom cannot tell what it bears on, so it bears on
+            # everything from this source.
+            out.append(dict(d, aspect="overall", key=str(d.get("key") or "overall"), unrecognisedAspect=aspect))
+    return out
+
+
+def _disagreement_why(d: dict) -> str:
+    """One plain sentence a reader can act on, naming the two answers and whether the question was the same."""
+    if d.get("unreadable"):
+        return str(d.get("note") or "a record of disagreement on this source cannot be read")
+    what = {"identity": "who made this source", "role": "what kind of source it is",
+            "overall": "this source overall", "lineage_supported": "whether this page supports descent at all"}.get(
+        d.get("aspect"), "this relationship")
+    pair = f"{d.get('earlier')!r} earlier and {d.get('later')!r} now"
+    if d.get("sameWholeRequest") is False:
+        return (f"two runs of the attribution review disagree about {what} ({pair}) on the same evidence, and the "
+                f"rest of the request changed between them as well, so neither answer has been established; a "
+                f"person decides")
+    return (f"two runs of the attribution review disagree about {what} ({pair}) on the same evidence and the same "
+            f"request, and nobody has decided between them")
 
 
 def judge_edge(edge: dict, s: dict, works: dict, text: str | None = None) -> dict:
@@ -366,13 +480,33 @@ def judge_edge(edge: dict, s: dict, works: dict, text: str | None = None) -> dic
         why.append("the attribution review confirmed this relationship only in part: " + str(detail.get("reason") or "").strip()[:200])
     elif av not in ("yes",):
         why.append("no attribution review has confirmed this relationship")
-    # Identity and role belong to the source and still gate everything that rests on it.
-    if av not in ("yes",) and mine == "yes":
-        for field, label in (("identity_correct", "identity"), ("role_correct", "role")):
-            if detail.get(field) not in ("yes", None):
-                why.append(f"the attribution review confirmed the source's {label} only as {detail.get(field)!r}, "
-                           f"and a relationship cannot rest on a source whose {label} is unconfirmed")
-    return {"status": "supported" if not why else "unknown", "why": why}
+    # Identity and role belong to the source and gate everything that rests on it. Two things were wrong here.
+    #
+    # The check ran only when the source verdict was not already "yes", and it read a MISSING field as a pass:
+    # `not in ("yes", None)` lets None through. So a relationship whose review never judged who made the source,
+    # or what kind of source it is, came out supported on the strength of the fields nobody had filled in. An
+    # omitted judgement is not a favourable one. Both fields must now say "yes" in so many words, on every edge,
+    # and anything else — missing, empty, "cannot_tell", a value from some other build, a detail block that is
+    # not readable at all — fails closed.
+    for field, label in (("identity_correct", "identity"), ("role_correct", "role")):
+        got = detail.get(field)
+        if got == "yes":
+            continue
+        said = "recorded nothing about it" if got is None else f"recorded {got!r}"
+        why.append(f"the attribution review did not affirm the source's {label}: it {said}, and a relationship "
+                   f"cannot rest on a source whose {label} is unconfirmed")
+    status = "supported" if not why else "unknown"
+    # An unresolved disagreement is not outweighed by a clean-looking later answer. Where two runs gave different
+    # answers to the same question on the same evidence and nobody has decided between them, the claim is held at
+    # `unresolved`: the latest answer does not win by being latest, nothing is averaged, and no third run is asked
+    # in the hope of a tie-break. A disputed edge is left disputed, because that is already a finding against it.
+    live = unresolved_disagreements(s, edge)
+    if live and status != "disputed":
+        return {"status": "unresolved",
+                "why": why + [_disagreement_why(d) for d in live],
+                "unresolvedDisagreements": live,
+                "wouldBeWithoutTheDisagreement": status}
+    return {"status": status, "why": why}
 
 
 def _relationship_entry(detail: dict, edge: dict) -> dict | None:
@@ -408,8 +542,12 @@ def build(sources: list, texts: dict | None = None) -> dict:
             "summary": {"works": len(works), "originalsEstablished": len(originals),
                         "descentEdges": len([e for e in edges if e.get("relation") in DESCENT]),
                         "supportedEdges": len([e for e in edges if e["status"] == "supported"]),
+                        "unresolvedEdges": len([e for e in edges if e["status"] == "unresolved"]),
                         "unknownEdges": len([e for e in edges if e["status"] == "unknown"]),
-                        "disputedEdges": len([e for e in edges if e["status"] == "disputed"])}}
+                        "disputedEdges": len([e for e in edges if e["status"] == "disputed"]),
+                        # Counted separately so a reader can see at a glance that some of this graph is waiting on
+                        # a person rather than on more research.
+                        "worksWithUnresolvedIdentity": len([w for w in works.values() if w.get("originUnresolved")])}}
 
 
 def chains(built: dict) -> list:
@@ -428,5 +566,9 @@ def chains(built: dict) -> list:
         out.append({"original": {"work": w["id"], "title": w.get("title"), "creators": w.get("creators"), "published": w.get("published"),
                                  "identifier": w.get("identifier")},
                     "supportedExtensions": [x for x in later if x["status"] == "supported"],
+                    # An extension held at `unresolved` is listed among the ones not established, because it is
+                    # not established; it is also named on its own, so nobody has to read the whole list to find
+                    # the ones that are waiting on a person rather than on better evidence.
+                    "awaitingAPersonsDecision": [x for x in later if x["status"] == "unresolved"],
                     "claimedButNotEstablished": [x for x in later if x["status"] != "supported"]})
     return out

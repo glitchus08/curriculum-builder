@@ -1615,6 +1615,9 @@ class Runner:
         ids = {s_["id"]: s_ for s_ in srcs}
         rs.setdefault("attribution", {})
         history = rs.setdefault("attributionHistory", {})
+        # Decisions a person has made about contradictions the review produced. Loom never writes these from a
+        # model run: a disagreement is settled by someone reading the document, or it is not settled at all.
+        resolutions = rs.setdefault("attributionResolutions", {})
         run_id = secrets.token_hex(8)
         # What produced this run, kept with it, so a later disagreement can be read against what actually differed.
         provenance = {"runId": run_id, "at": storage.now_iso(), "model": r["model"], "stage": "attribution_review",
@@ -1622,26 +1625,98 @@ class Runner:
                       "promptCharacters": len(p), "sourcesInRequest": len(srcs),
                       "reviewerInputVersion": prompts.REVIEWER_INPUT_VERSION, "build": _build_id()}
 
-        def remember(key, entry):
-            """Append this judgement to the source's history and say whether it disagrees with the last identical ask."""
-            past = history.setdefault(key, [])
+        def answers_in(entry):
+            """Every question one judgement answered, keyed so two runs can be compared question by question.
+
+            Comparing runs on the aggregate verdict alone hid the disagreements that matter most. The aggregate is
+            "yes" only when identity, role and descent are all affirmative, so it stays "partly" while a single
+            relationship underneath it flips from yes to no — and that flip is exactly what decides whether a link
+            in the lineage graph stands. Each relationship is therefore its own question, matched across runs by
+            the earlier work it names and the relation it claims.
+            """
+            d = entry.get("detail") if isinstance(entry.get("detail"), dict) else {}
+            out = {"overall": entry.get("verdict"), "identity": d.get("identity_correct"),
+                   "role": d.get("role_correct"), "lineage_supported": d.get("lineage_supported")}
+            for r in d.get("relationships") or []:
+                if isinstance(r, dict):
+                    out[lineage.disagreement_key("relationship", r.get("earlier_work"), r.get("relation"))] = r.get("supported")
+            return out
+
+        def resolution_for(claim_key, dkey, entry):
+            """A person's decision on one disagreement, or None. Nothing less than a real decision counts.
+
+            A resolution has to name who made it, when, which answer stands, the words in the document that
+            settle it and why. It is also tied to the evidence it was made on: if the page, the quotation or the
+            retrieved bytes change afterwards, the decision was about something else and the question reopens.
+            """
+            r = (resolutions.get(claim_key) or {}).get(dkey)
+            if not isinstance(r, dict):
+                return None
+            if r.get("evidenceFingerprint") != entry.get("fingerprint"):
+                return None
+            if not all(str(r.get(f) or "").strip() for f in ("by", "at", "chosen", "becauseWords", "reason")):
+                return None
+            return r
+
+        def remember(claim_key, entry):
+            """Append this judgement to the source's history and record what it contradicts, question by question.
+
+            Nothing here resolves a contradiction. Two runs of one model share its errors, so a second answer is
+            not a check on the first; where they differ, both are kept and the claim is held until a person
+            decides on the evidence. The later answer is not preferred for being later, no answer is averaged
+            against another, and no further run is asked in the hope of breaking the tie.
+            """
+            past = history.setdefault(claim_key, [])
             same_input = [h for h in past if h.get("fingerprint") == entry.get("fingerprint")]
-            if same_input and same_input[-1].get("verdict") != entry.get("verdict"):
-                prev = same_input[-1]
-                # Same evidence is not the same question. Only call it a disagreement when the WHOLE request
-                # matched — same judge rules, same schema, same prompt — otherwise say plainly what else changed,
-                # so a comparison is never read as being about the model when the asking had changed.
+            prev = same_input[-1] if same_input else None
+            live: dict = {}
+            if prev is not None:
+                # A contradiction does not expire by being repeated. Answer yes, then no, then no again, and the
+                # last two runs agree, so comparing only against the run before would show nothing wrong by the
+                # third — while the first two still contradict each other on the same evidence. Unresolved
+                # disagreements are therefore carried forward under their own key until a person settles them.
+                for d in prev.get("unresolvedDisagreements") or []:
+                    if isinstance(d, dict) and d.get("key"):
+                        live[d["key"]] = d
+                # Same evidence is not the same question. Only call it a disagreement about the model when the
+                # WHOLE request matched — same judge rules, same schema, same prompt — otherwise say plainly that
+                # the asking changed too, so the difference is never counted as evidence about the model alone.
                 same_request = (prev.get("provenance") or {}).get("requestFingerprint") == request_print
-                entry["disagreesWithEarlierRun"] = {
-                    "earlierVerdict": prev.get("verdict"), "earlierRunId": prev.get("runId"), "earlierAt": prev.get("at"),
-                    "sameEvidence": True, "sameWholeRequest": same_request,
-                    "note": ("The same evidence produced a different verdict in an earlier run. This is an UNRESOLVED "
-                             "disagreement, recorded rather than settled: it is not averaged, not voted on, and the "
-                             "later answer is not assumed to be the better one. A person decides.") +
-                            ("" if same_request else
-                             " NOTE: the rest of the request — the judge rules or the answer schema — also changed "
-                             "between these two runs, so this difference is NOT evidence about the model alone and "
-                             "must not be counted as one.")}
+                was, now_ = answers_in(prev), answers_in(entry)
+                for dkey in list(was) + [k for k in now_ if k not in was]:
+                    a, b = was.get(dkey), now_.get(dkey)
+                    # An unanswered question is not a contradicting answer. Where one run left a question blank,
+                    # that is an omission — handled by failing closed where the answer is needed — and inventing a
+                    # disagreement out of it would be the same mistake as reading an omission as a denial.
+                    if a is None or b is None or a == b:
+                        continue
+                    aspect = "relationship" if dkey.startswith("relationship|") else dkey
+                    live[dkey] = {"aspect": aspect, "key": dkey, "earlier": a, "later": b,
+                                  "earlierRunId": prev.get("runId"), "earlierAt": prev.get("at"),
+                                  "laterRunId": run_id, "laterAt": entry.get("at"),
+                                  "sameEvidence": True, "sameWholeRequest": same_request,
+                                  "note": ("The same evidence produced a different answer to this question in an "
+                                           "earlier run. This is an UNRESOLVED disagreement, recorded rather than "
+                                           "settled: it is not averaged, not voted on, and the later answer is not "
+                                           "assumed to be the better one. A person decides.") +
+                                          ("" if same_request else
+                                           " NOTE: the rest of the request — the judge rules or the answer schema — "
+                                           "also changed between these two runs, so this difference is NOT evidence "
+                                           "about the model alone and must not be counted as one.")}
+            settled = {}
+            for dkey in list(live):
+                if r := resolution_for(claim_key, dkey, entry):
+                    settled[dkey] = dict(live.pop(dkey), resolvedBy=r)
+            if live:
+                entry["unresolvedDisagreements"] = list(live.values())
+            if settled:
+                entry["resolvedDisagreements"] = list(settled.values())
+            # Kept for anything still reading the older single-verdict field. It says only what it ever said:
+            # whether the aggregate verdict moved.
+            if agg := live.get("overall") or settled.get("overall"):
+                entry["disagreesWithEarlierRun"] = {"earlierVerdict": agg.get("earlier"), "earlierRunId": agg.get("earlierRunId"),
+                                                    "earlierAt": agg.get("earlierAt"), "sameEvidence": True,
+                                                    "sameWholeRequest": agg.get("sameWholeRequest"), "note": agg.get("note")}
             past.append(dict(entry, runId=run_id, provenance=provenance))
             del past[:-20]
             return entry

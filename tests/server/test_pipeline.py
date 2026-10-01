@@ -2550,3 +2550,144 @@ class LegacyVerdicts(unittest.TestCase):
         self.assertEqual(by_claim[other["claim"]]["sourceReview"]["supports_claim"], "yes")
         self.assertEqual(by_claim[first["claim"]]["sourceReview"]["supports_claim"], "not_judged", "two claims on one page: the old verdict cannot be assigned to either")
         self.assertEqual(by_claim[twin["claim"]]["sourceReview"]["supports_claim"], "not_judged")
+
+
+class DisagreementIsDetectedQuestionByQuestion(unittest.TestCase):
+    """Comparing two runs on the aggregate verdict alone hid the disagreements that decide the lineage graph.
+
+    The aggregate is "yes" only when identity, role and descent are all affirmative, so it sits still at "concerns"
+    while a single relationship underneath it flips from yes to no — and that flip is exactly what decides whether
+    a link stands. These run the real engine against the fake CLI in isolated temporary storage.
+    """
+
+    def _run(self, cid):
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        return wait(cid)
+
+    def _claims_a_relationship(self, cid):
+        """Give every source one claimed relationship, so there is a per-relationship judgement to compare."""
+        rel = [{"relation": "corrected", "earlier_work": "The earlier specification",
+                "earlier_work_identifier": "doi:10.0000/earlier", "what_changed": "fixes a flaw",
+                "supporting_words": "A table has rows and columns", "limits": ""}]
+        r = engine.runner("pipe", cid).load()
+        made = [dict(x, lineage=rel) for x in r["stages"]["research"]["output"]["sources"]]
+        r["stages"]["research"]["output"]["sources"] = made
+        for b in r["stages"]["research"]["batches"]:
+            b.setdefault("output", {})["sources"] = made
+        engine.runner("pipe", cid).save(r)
+
+    def _key(self, rec):
+        return next(iter(rec["stages"]["research"]["attributionHistory"]))
+
+    def test_a_relationship_flip_is_caught_though_the_overall_verdict_never_moves(self):
+        f, cid, rec = begin("attrib-per-relationship", attr_rel="yes")
+        self._claims_a_relationship(cid)
+        rec = self._run(cid)
+        key = self._key(rec)
+        before = rec["stages"]["research"]["attribution"][key]
+        self.assertTrue(before["detail"].get("relationships"), "this fixture judges relationships separately")
+        self.assertNotIn("unresolvedDisagreements", before, "one run cannot disagree with itself")
+
+        # The SAME evidence, the same request, the same overall verdict — and the opposite answer about the one
+        # relationship. Nothing above it moves, which is why the aggregate comparison never saw this.
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        flipped = dict(h[-1]["detail"], relationships=[dict(x, supported="no") for x in h[-1]["detail"]["relationships"]])
+        h[-1] = dict(h[-1], detail=flipped)
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+
+        cur = rec["stages"]["research"]["attribution"][key]
+        self.assertEqual(cur["verdict"], before["verdict"], "the overall verdict really did not move")
+        live = cur.get("unresolvedDisagreements") or []
+        self.assertTrue(live, "a relationship answered two ways on the same evidence is a disagreement")
+        d = live[0]
+        self.assertEqual(d["aspect"], "relationship")
+        self.assertEqual((d["earlier"], d["later"]), ("no", "yes"))
+        self.assertTrue(d["sameEvidence"])
+        self.assertTrue(d["sameWholeRequest"], "nothing but the answer changed")
+        self.assertIn("UNRESOLVED", d["note"])
+
+    def test_identity_and_role_are_compared_as_their_own_questions(self):
+        f, cid, rec = begin("attrib-identity-aspect")
+        rec = self._run(cid)
+        key = self._key(rec)
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no", role_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+        got = {d["aspect"] for d in rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements") or []}
+        self.assertIn("identity", got)
+        self.assertIn("role", got)
+
+    def test_a_question_one_run_left_blank_is_not_turned_into_a_disagreement(self):
+        """An omission is an omission. Reading it as a contradiction would be the same mistake, in reverse, as
+        reading it as a confirmation: both invent an answer nobody gave."""
+        f, cid, rec = begin("attrib-omitted")
+        rec = self._run(cid)
+        key = self._key(rec)
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail={k: v for k, v in h[-1]["detail"].items() if k != "role_correct"})
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+        got = {d["aspect"] for d in rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements") or []}
+        self.assertNotIn("role", got, "nobody gave two answers about the role")
+
+    def test_a_contradiction_does_not_expire_by_being_repeated(self):
+        """Answer yes, then no, then no again: the last two agree, so comparing only against the run before would
+        show nothing wrong by the third, while the first two still contradict each other on the same evidence."""
+        f, cid, rec = begin("attrib-carry-forward")
+        rec = self._run(cid)
+        key = self._key(rec)
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+        self.assertTrue(rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements"), "raised here")
+
+        # A third run that agrees with the second. The question between runs one and two is still open.
+        rec = self._run(cid)
+        live = rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements") or []
+        self.assertTrue(live, "an unsettled question is not settled by asking again and getting the same answer")
+        self.assertEqual([d["aspect"] for d in live], ["identity"])
+
+    def test_only_a_person_s_recorded_decision_clears_a_disagreement(self):
+        f, cid, rec = begin("attrib-resolution")
+        rec = self._run(cid)
+        key = self._key(rec)
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+        cur = rec["stages"]["research"]["attribution"][key]
+        self.assertTrue(cur.get("unresolvedDisagreements"))
+        fp = cur["fingerprint"]
+
+        # An incomplete decision is not a decision: each of these is missing something a person has to supply.
+        for partial in ({"by": "A Person"},
+                        {"by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes"},
+                        {"by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes",
+                         "becauseWords": "the masthead names the author", "reason": "checked the document",
+                         "evidenceFingerprint": "a-different-fingerprint"}):
+            r = engine.runner("pipe", cid).load()
+            r["stages"]["research"]["attributionResolutions"] = {key: {"identity": partial}}
+            engine.runner("pipe", cid).save(r)
+            rec = self._run(cid)
+            self.assertTrue(rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements"),
+                            f"{sorted(partial)} is not a decision anyone can audit")
+
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["research"]["attributionResolutions"] = {key: {"identity": {
+            "by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes",
+            "becauseWords": "the masthead names the author", "reason": "read the document and the earlier run was wrong",
+            "evidenceFingerprint": fp}}}
+        engine.runner("pipe", cid).save(r)
+        rec = self._run(cid)
+        cur = rec["stages"]["research"]["attribution"][key]
+        self.assertFalse(cur.get("unresolvedDisagreements"), "a complete decision on this evidence settles it")
+        self.assertTrue(cur.get("resolvedDisagreements"), "and what was decided is kept, not erased")
+        self.assertEqual(cur["resolvedDisagreements"][0]["resolvedBy"]["by"], "A Person")

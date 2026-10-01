@@ -203,7 +203,22 @@ def v2_out():
     if stage == "attribution_review":
         srcs = block("sources") or []
         no = variant.get("attr_no") or []
-        return {"verdict": "concerns", "summary": f"{TAG} attribution", "sources": [{"id": x["id"], "identity_correct": "no" if x["id"] in no else "yes", "role_correct": "yes", "lineage_supported": "none_claimed", "reason": f"{TAG} reason"} for x in srcs], "origin_unknown": [], "disputed_or_branching": [], "current_relevance_concerns": []}
+        # Per-relationship judgements, off unless a test asks for them, so every existing expectation is unchanged.
+        # `attr_rel` is the answer this reviewer gives for each claimed relationship; `attr_rel_flip` overrides it
+        # for named sources, which is how a test makes ONE relationship change its answer between two runs while
+        # the source's overall verdict stays exactly where it was.
+        rel = variant.get("attr_rel")
+        flip = variant.get("attr_rel_flip") or {}
+
+        def rels_for(x):
+            if not rel:
+                return {}
+            got = flip.get(x["id"], rel)
+            return {"relationships": [{"earlier_work": r.get("earlier_work"), "relation": r.get("relation"),
+                                       "supported": got, "reason": f"{TAG} per-relationship reason"}
+                                      for r in (x.get("lineage_given") or [])]}
+
+        return {"verdict": "concerns", "summary": f"{TAG} attribution", "sources": [dict({"id": x["id"], "identity_correct": "no" if x["id"] in no else "yes", "role_correct": "yes", "lineage_supported": "none_claimed", "reason": f"{TAG} reason"}, **rels_for(x)) for x in srcs], "origin_unknown": [], "disputed_or_branching": [], "current_relevance_concerns": []}
     if stage == "outline_review":
         must = [{"severity": "must_fix", "area": "time", "finding": f"{TAG} time is tight", "suggestion": "trim"}] if variant.get("ol") == "must" else []
         return {"verdict": "concerns" if must else "sound", "summary": f"{TAG} feasibility", "findings": must, "project_checks": [{"project": "P1", "feasible": "yes", "why": "ok"}], "time_verdict": {"fits": not must, "why": "ok"}}
