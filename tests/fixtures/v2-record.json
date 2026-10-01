@@ -1,0 +1,2932 @@
+{
+ "version": 1,
+ "brief": {
+  "format": "Course",
+  "formatKey": "course",
+  "topics": [
+   "Python",
+   "Charts"
+  ],
+  "mode": "shared",
+  "world": null,
+  "audience": "A mixed group",
+  "audienceKey": "mixed",
+  "groupSize": "Up to 8",
+  "prior": "New to it",
+  "liveAndOwnTime": "About half and half. 1 h of independent work each week, outside the meetings and counted apart from them",
+  "priorKey": "new",
+  "outcome": "Make an honest chart from a small table and explain what it shows",
+  "delivery": "Blended: some live, some in your own time",
+  "deliveryKey": "blended",
+  "time": "2 weeks, 2 h each week as 2 meetings of 1 h, plus 1 h of independent work each week",
+  "independentPerWeek": 60,
+  "requirements": [
+   "tasks may assume a laptop for each learner or pair"
+  ]
+ },
+ "plan": {
+  "sessions": 4,
+  "minutes": [
+   60,
+   60,
+   60,
+   60
+  ],
+  "unit": "Meeting",
+  "total": 240,
+  "weekly": true,
+  "setByTeam": true,
+  "span": "2 weeks, 2 h each week as 2 meetings of 1 h, plus 1 h of independent work each week",
+  "weeks": 2,
+  "meetingsPerWeek": 2,
+  "cadence": "2 meetings each week, 1 h each; about half and half",
+  "independent": {
+   "perWeekMinutes": 60,
+   "weeks": 2,
+   "totalMinutes": 120
+  }
+ },
+ "briefDigest": "[[\"format\",\"course\",\"\"],[\"entry\",\"mix\",\"\"],[\"mix\",[\"Python\",\"Charts\"],\"\"],[\"mode\",\"shared\",\"\"],[\"audience\",\"mixed\",\"\"],[\"group\",\"g8\",\"\"],[\"prior\",\"new\",\"\"],[\"outcome\",\"Make an honest chart from a small table and explain what it shows\",\"\"],[\"delivery\",\"blended\",\"\"],[\"split\",\"half\",\"\"],[\"time\",\"w2\",\"\"],[\"hours\",\"2\",\"\"],[\"pattern\",\"p2\",\"\"],[\"own\",\"i1\",\"\"],[\"limits\",[\"laptops\"],\"\"]]",
+ "status": "done",
+ "pause": null,
+ "now": null,
+ "startedAt": "2026-09-29T13:26:40Z",
+ "stages": {
+  "research": {
+   "status": "done",
+   "startedAt": "2026-09-29T13:26:40Z",
+   "batches": [
+    {
+     "key": "approach",
+     "nodes": [],
+     "status": "done",
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double"
+    },
+    {
+     "key": "nodes-1",
+     "nodes": [
+      "N5",
+      "N3",
+      "N1"
+     ],
+     "status": "done",
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double"
+    },
+    {
+     "key": "nodes-2",
+     "nodes": [
+      "N2"
+     ],
+     "status": "done",
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double"
+    },
+    {
+     "key": "targeted-1",
+     "nodes": [
+      "N3"
+     ],
+     "status": "done",
+     "questions": [
+      "TEST DOUBLE what is a table?"
+     ],
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double"
+    }
+   ],
+   "notResearchedNames": [],
+   "notResearched": [],
+   "verdicts": {
+    "https://example.org/approach": {
+     "supports_claim": "yes",
+     "reason": "TEST DOUBLE reason",
+     "by": "source_review",
+     "requestId": "ab465ba34ddb14b7"
+    },
+    "https://example.org/nodes-1": {
+     "supports_claim": "yes",
+     "reason": "TEST DOUBLE reason",
+     "by": "source_review",
+     "requestId": "ab465ba34ddb14b7"
+    },
+    "https://example.org/nodes-2": {
+     "supports_claim": "yes",
+     "reason": "TEST DOUBLE reason",
+     "by": "source_review",
+     "requestId": "ab465ba34ddb14b7"
+    },
+    "https://example.org/targeted-1": {
+     "supports_claim": "yes",
+     "reason": "TEST DOUBLE reason",
+     "by": "source_review",
+     "requestId": "ab465ba34ddb14b7"
+    }
+   },
+   "output": {
+    "sources": [
+     {
+      "title": "TEST DOUBLE approach source",
+      "url": "https://example.org/approach",
+      "publisher": "Example",
+      "year": "2024",
+      "kind": "textbook_or_reference",
+      "topic": "Python",
+      "node_ids": [],
+      "claim": "TEST DOUBLE claim approach",
+      "finding": "A table has rows.",
+      "quote": "each row is one record",
+      "strength": "direct",
+      "limits": "",
+      "subject_version": "2024",
+      "retrievedAt": "2026-09-29T13:26:40Z",
+      "askedAt": "2026-09-29T13:26:40Z",
+      "fetch": "retrieved",
+      "openedByAI": true,
+      "personChecked": null,
+      "retrievedExcerpt": "A table has rows and columns. Each row is one record and each column one measurement. This page states it plainly for beginners.",
+      "quoteFound": true,
+      "id": "S1",
+      "link": {
+       "checkedAt": "2026-09-29T13:26:40Z",
+       "opened": false,
+       "status": null,
+       "note": "Link check was switched off for this run."
+      },
+      "sourceReview": {
+       "supports_claim": "yes",
+       "reason": "TEST DOUBLE reason",
+       "by": "source_review",
+       "requestId": "ab465ba34ddb14b7"
+      }
+     },
+     {
+      "title": "TEST DOUBLE nodes-1 source",
+      "url": "https://example.org/nodes-1",
+      "publisher": "Example",
+      "year": "2024",
+      "kind": "textbook_or_reference",
+      "topic": "Python",
+      "node_ids": [
+       "N1",
+       "N3",
+       "N5"
+      ],
+      "claim": "TEST DOUBLE claim nodes-1",
+      "finding": "A table has rows.",
+      "quote": "each row is one record",
+      "strength": "direct",
+      "limits": "",
+      "subject_version": "2024",
+      "retrievedAt": "2026-09-29T13:26:40Z",
+      "askedAt": "2026-09-29T13:26:40Z",
+      "fetch": "retrieved",
+      "openedByAI": true,
+      "personChecked": null,
+      "retrievedExcerpt": "A table has rows and columns. Each row is one record and each column one measurement. This page states it plainly for beginners.",
+      "quoteFound": true,
+      "id": "S2",
+      "link": {
+       "checkedAt": "2026-09-29T13:26:40Z",
+       "opened": false,
+       "status": null,
+       "note": "Link check was switched off for this run."
+      },
+      "sourceReview": {
+       "supports_claim": "yes",
+       "reason": "TEST DOUBLE reason",
+       "by": "source_review",
+       "requestId": "ab465ba34ddb14b7"
+      }
+     },
+     {
+      "title": "TEST DOUBLE nodes-2 source",
+      "url": "https://example.org/nodes-2",
+      "publisher": "Example",
+      "year": "2024",
+      "kind": "textbook_or_reference",
+      "topic": "Python",
+      "node_ids": [
+       "N2"
+      ],
+      "claim": "TEST DOUBLE claim nodes-2",
+      "finding": "A table has rows.",
+      "quote": "each row is one record",
+      "strength": "direct",
+      "limits": "",
+      "subject_version": "2024",
+      "retrievedAt": "2026-09-29T13:26:40Z",
+      "askedAt": "2026-09-29T13:26:40Z",
+      "fetch": "retrieved",
+      "openedByAI": true,
+      "personChecked": null,
+      "retrievedExcerpt": "A table has rows and columns. Each row is one record and each column one measurement. This page states it plainly for beginners.",
+      "quoteFound": true,
+      "id": "S3",
+      "link": {
+       "checkedAt": "2026-09-29T13:26:40Z",
+       "opened": false,
+       "status": null,
+       "note": "Link check was switched off for this run."
+      },
+      "sourceReview": {
+       "supports_claim": "yes",
+       "reason": "TEST DOUBLE reason",
+       "by": "source_review",
+       "requestId": "ab465ba34ddb14b7"
+      }
+     },
+     {
+      "title": "TEST DOUBLE targeted-1 source",
+      "url": "https://example.org/targeted-1",
+      "publisher": "Example",
+      "year": "2024",
+      "kind": "textbook_or_reference",
+      "topic": "Python",
+      "node_ids": [
+       "N3"
+      ],
+      "claim": "TEST DOUBLE claim targeted-1",
+      "finding": "A table has rows.",
+      "quote": "each row is one record",
+      "strength": "direct",
+      "limits": "",
+      "subject_version": "2024",
+      "retrievedAt": "2026-09-29T13:26:40Z",
+      "askedAt": "2026-09-29T13:26:40Z",
+      "fetch": "retrieved",
+      "openedByAI": true,
+      "personChecked": null,
+      "retrievedExcerpt": "A table has rows and columns. Each row is one record and each column one measurement. This page states it plainly for beginners.",
+      "quoteFound": true,
+      "id": "S4",
+      "link": {
+       "checkedAt": "2026-09-29T13:26:40Z",
+       "opened": false,
+       "status": null,
+       "note": "Link check was switched off for this run."
+      },
+      "sourceReview": {
+       "supports_claim": "yes",
+       "reason": "TEST DOUBLE reason",
+       "by": "source_review",
+       "requestId": "ab465ba34ddb14b7"
+      }
+     }
+    ],
+    "searches": [
+     "approach search",
+     "nodes-1 search",
+     "nodes-2 search",
+     "targeted-1 search"
+    ],
+    "pagesOpened": [
+     "https://example.org/approach",
+     "https://example.org/nodes-1",
+     "https://example.org/nodes-2",
+     "https://example.org/targeted-1"
+    ],
+    "pagesAskedFor": [
+     {
+      "url": "https://example.org/approach",
+      "state": "retrieved",
+      "note": ""
+     },
+     {
+      "url": "https://example.org/nodes-1",
+      "state": "retrieved",
+      "note": ""
+     },
+     {
+      "url": "https://example.org/nodes-2",
+      "state": "retrieved",
+      "note": ""
+     },
+     {
+      "url": "https://example.org/targeted-1",
+      "state": "retrieved",
+      "note": ""
+     }
+    ],
+    "not_opened": [],
+    "open_questions": [],
+    "node_findings": [
+     {
+      "node": "N1",
+      "status": "supported",
+      "summary": "TEST DOUBLE covered",
+      "limits": ""
+     },
+     {
+      "node": "N3",
+      "status": "supported",
+      "summary": "TEST DOUBLE covered",
+      "limits": ""
+     },
+     {
+      "node": "N5",
+      "status": "supported",
+      "summary": "TEST DOUBLE covered",
+      "limits": ""
+     },
+     {
+      "node": "N2",
+      "status": "supported",
+      "summary": "TEST DOUBLE covered",
+      "limits": ""
+     }
+    ],
+    "combination_evidence": {
+     "status": "weak",
+     "note": "TEST DOUBLE note"
+    },
+    "researchedAt": "2026-09-29T13:26:40Z",
+    "unconfirmedReads": [],
+    "nodeCoverage": [
+     {
+      "node": "N1",
+      "name": "Python",
+      "role": "required",
+      "sources": [
+       "S2"
+      ],
+      "status": "supported"
+     },
+     {
+      "node": "N2",
+      "name": "Charts",
+      "role": "required",
+      "sources": [
+       "S3"
+      ],
+      "status": "supported"
+     },
+     {
+      "node": "N3",
+      "name": "Reading a table",
+      "role": "required",
+      "sources": [
+       "S2",
+       "S4"
+      ],
+      "status": "supported"
+     },
+     {
+      "node": "N5",
+      "name": "Counting rows",
+      "role": "required",
+      "sources": [
+       "S2"
+      ],
+      "status": "supported"
+     }
+    ]
+   },
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double"
+  },
+  "outline": {
+   "status": "done",
+   "approved": true,
+   "startedAt": "2026-09-29T13:27:08Z",
+   "finishedAt": "2026-09-29T13:27:08Z",
+   "model": "test-double",
+   "output": {
+    "course_outcome": "Make an honest chart from a small table and explain what it shows",
+    "final_evidence": "TEST DOUBLE a report",
+    "feasibility": {
+     "fits": true,
+     "concern": ""
+    },
+    "sessions": [
+     {
+      "title": "TEST DOUBLE session 1",
+      "outcome": "TEST DOUBLE learners can do part 1",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N5",
+       "N3"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 2",
+      "outcome": "TEST DOUBLE learners can do part 2",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       1
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N1"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 3",
+      "outcome": "TEST DOUBLE learners can do part 3",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       2
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N2"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 4",
+      "outcome": "TEST DOUBLE learners can do part 4",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       3
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     }
+    ],
+    "integration": {
+     "status": "partly",
+     "reason": "TEST DOUBLE reason",
+     "joining_task": ""
+    },
+    "projects": [
+     {
+      "id": "P1",
+      "kind": "minor",
+      "title": "TEST DOUBLE minor project",
+      "purpose": "practise",
+      "nodes_required": [
+       "N3"
+      ],
+      "available_after_session": 2,
+      "hosted_in_sessions": [
+       3
+      ],
+      "milestones": [
+       {
+        "session": 3,
+        "what": "draft"
+       }
+      ],
+      "deliverable": "a table",
+      "minutes": {
+       "live": 20,
+       "independent": 20
+      }
+     },
+     {
+      "id": "P2",
+      "kind": "major",
+      "title": "TEST DOUBLE capstone",
+      "purpose": "integrate",
+      "nodes_required": [
+       "N1",
+       "N2",
+       "N3"
+      ],
+      "available_after_session": 3,
+      "hosted_in_sessions": [
+       4
+      ],
+      "milestones": [
+       {
+        "session": 4,
+        "what": "hand in"
+       }
+      ],
+      "deliverable": "a report",
+      "minutes": {
+       "live": 30,
+       "independent": 40
+      }
+     }
+    ],
+    "deferred": [],
+    "time_conflict": {
+     "exists": false,
+     "explanation": "",
+     "options": []
+    },
+    "pathway_note": "",
+    "assumptions": [
+     "TEST DOUBLE assumption"
+    ]
+   },
+   "coverage": {
+    "rows": [
+     {
+      "node": "N1",
+      "name": "Python",
+      "role": "required",
+      "kind": "requested",
+      "taughtInSession": 2,
+      "practisedInSessions": [
+       2
+      ],
+      "usedByProjects": [
+       "P2"
+      ]
+     },
+     {
+      "node": "N2",
+      "name": "Charts",
+      "role": "required",
+      "kind": "requested",
+      "taughtInSession": 3,
+      "practisedInSessions": [
+       3
+      ],
+      "usedByProjects": [
+       "P2"
+      ]
+     },
+     {
+      "node": "N3",
+      "name": "Reading a table",
+      "role": "required",
+      "kind": "foundation",
+      "taughtInSession": 1,
+      "practisedInSessions": [
+       1
+      ],
+      "usedByProjects": [
+       "P1",
+       "P2"
+      ]
+     },
+     {
+      "node": "N4",
+      "name": "Files and folders",
+      "role": "already_known",
+      "kind": "foundation",
+      "taughtInSession": null,
+      "practisedInSessions": [],
+      "usedByProjects": []
+     },
+     {
+      "node": "N5",
+      "name": "Counting rows",
+      "role": "required",
+      "kind": "foundation",
+      "taughtInSession": 1,
+      "practisedInSessions": [
+       1
+      ],
+      "usedByProjects": []
+     }
+    ],
+    "deferred": [],
+    "requiredNotTaught": []
+   },
+   "approvedAt": "2026-09-29T13:27:24Z",
+   "approved_outline": {
+    "course_outcome": "Make an honest chart from a small table and explain what it shows",
+    "final_evidence": "TEST DOUBLE a report",
+    "feasibility": {
+     "fits": true,
+     "concern": ""
+    },
+    "sessions": [
+     {
+      "title": "TEST DOUBLE session 1",
+      "outcome": "TEST DOUBLE learners can do part 1",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N5",
+       "N3"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 2",
+      "outcome": "TEST DOUBLE learners can do part 2",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       1
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N1"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 3",
+      "outcome": "TEST DOUBLE learners can do part 3",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       2
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [
+       "N2"
+      ],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     },
+     {
+      "title": "TEST DOUBLE session 4",
+      "outcome": "TEST DOUBLE learners can do part 4",
+      "serves": "step",
+      "topics": [
+       "Python",
+       "Charts"
+      ],
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a method"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a method"
+       }
+      ],
+      "builds_on": [
+       3
+      ],
+      "key_task": "TEST DOUBLE X to Y",
+      "evidence_of_learning": "TEST DOUBLE Y",
+      "teaches": [],
+      "practises": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        "task"
+       ]
+      }
+     }
+    ],
+    "integration": {
+     "status": "partly",
+     "reason": "TEST DOUBLE reason",
+     "joining_task": ""
+    },
+    "projects": [
+     {
+      "id": "P1",
+      "kind": "minor",
+      "title": "TEST DOUBLE minor project",
+      "purpose": "practise",
+      "nodes_required": [
+       "N3"
+      ],
+      "available_after_session": 2,
+      "hosted_in_sessions": [
+       3
+      ],
+      "milestones": [
+       {
+        "session": 3,
+        "what": "draft"
+       }
+      ],
+      "deliverable": "a table",
+      "minutes": {
+       "live": 20,
+       "independent": 20
+      }
+     },
+     {
+      "id": "P2",
+      "kind": "major",
+      "title": "TEST DOUBLE capstone",
+      "purpose": "integrate",
+      "nodes_required": [
+       "N1",
+       "N2",
+       "N3"
+      ],
+      "available_after_session": 3,
+      "hosted_in_sessions": [
+       4
+      ],
+      "milestones": [
+       {
+        "session": 4,
+        "what": "hand in"
+       }
+      ],
+      "deliverable": "a report",
+      "minutes": {
+       "live": 30,
+       "independent": 40
+      }
+     }
+    ],
+    "deferred": [],
+    "time_conflict": {
+     "exists": false,
+     "explanation": "",
+     "options": []
+    },
+    "pathway_note": "",
+    "assumptions": [
+     "TEST DOUBLE assumption"
+    ]
+   },
+   "editedByTeam": false,
+   "approved_map": {
+    "nodes": [
+     {
+      "id": "N1",
+      "name": "Python",
+      "kind": "requested",
+      "role": "required",
+      "why_needed": "",
+      "needed_by": [
+       "OUTCOME"
+      ],
+      "requires": [
+       "N3",
+       "N5"
+      ],
+      "depth": "applied",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 60,
+      "needs_evidence": true,
+      "research_questions": [
+       "q1"
+      ]
+     },
+     {
+      "id": "N2",
+      "name": "Charts",
+      "kind": "requested",
+      "role": "required",
+      "why_needed": "",
+      "needed_by": [
+       "OUTCOME"
+      ],
+      "requires": [
+       "N3"
+      ],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 40,
+      "needs_evidence": true,
+      "research_questions": [
+       "q2"
+      ]
+     },
+     {
+      "id": "N3",
+      "name": "Reading a table",
+      "kind": "foundation",
+      "role": "required",
+      "why_needed": "TEST DOUBLE both topics start from a table",
+      "needed_by": [
+       "N1",
+       "N2"
+      ],
+      "requires": [
+       "N4"
+      ],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 30,
+      "needs_evidence": true,
+      "research_questions": [
+       "q3"
+      ]
+     },
+     {
+      "id": "N4",
+      "name": "Files and folders",
+      "kind": "foundation",
+      "role": "already_known",
+      "why_needed": "TEST DOUBLE learners can already open a file",
+      "needed_by": [
+       "N3"
+      ],
+      "requires": [],
+      "depth": "awareness",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 10,
+      "needs_evidence": false,
+      "research_questions": []
+     },
+     {
+      "id": "N5",
+      "name": "Counting rows",
+      "kind": "foundation",
+      "role": "required",
+      "why_needed": "TEST DOUBLE reviewer says it is missing",
+      "needed_by": [
+       "N1"
+      ],
+      "requires": [],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 15,
+      "needs_evidence": true,
+      "research_questions": [],
+      "addedBy": "foundation review"
+     }
+    ],
+    "outcome_needs": [
+     {
+      "capability": "read a table",
+      "nodes": [
+       "N3"
+      ]
+     }
+    ],
+    "assumed_entry": [
+     "can open a file"
+    ],
+    "stop_reason": "TEST DOUBLE reached the entry level",
+    "unresolved": [],
+    "derived": {
+     "order": [
+      "N4",
+      "N5",
+      "N3",
+      "N1",
+      "N2"
+     ],
+     "levels": {
+      "N4": 1,
+      "N5": 1,
+      "N3": 2,
+      "N1": 3,
+      "N2": 3
+     },
+     "requiredMinutes": 145,
+     "optionalMinutes": 0,
+     "openGaps": []
+    }
+   },
+   "approved_coverage": {
+    "rows": [
+     {
+      "node": "N1",
+      "name": "Python",
+      "role": "required",
+      "kind": "requested",
+      "taughtInSession": 2,
+      "practisedInSessions": [
+       2
+      ],
+      "usedByProjects": [
+       "P2"
+      ]
+     },
+     {
+      "node": "N2",
+      "name": "Charts",
+      "role": "required",
+      "kind": "requested",
+      "taughtInSession": 3,
+      "practisedInSessions": [
+       3
+      ],
+      "usedByProjects": [
+       "P2"
+      ]
+     },
+     {
+      "node": "N3",
+      "name": "Reading a table",
+      "role": "required",
+      "kind": "foundation",
+      "taughtInSession": 1,
+      "practisedInSessions": [
+       1
+      ],
+      "usedByProjects": [
+       "P1",
+       "P2"
+      ]
+     },
+     {
+      "node": "N4",
+      "name": "Files and folders",
+      "role": "already_known",
+      "kind": "foundation",
+      "taughtInSession": null,
+      "practisedInSessions": [],
+      "usedByProjects": []
+     },
+     {
+      "node": "N5",
+      "name": "Counting rows",
+      "role": "required",
+      "kind": "foundation",
+      "taughtInSession": 1,
+      "practisedInSessions": [
+       1
+      ],
+      "usedByProjects": []
+     }
+    ],
+    "deferred": [],
+    "requiredNotTaught": []
+   },
+   "acknowledged": []
+  },
+  "materials": {
+   "status": "done",
+   "sessions": [
+    {
+     "status": "done",
+     "startedAt": "2026-09-29T13:27:24Z",
+     "problems": [],
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE session 1",
+      "outcome": "TEST DOUBLE outcome using Python, Charts",
+      "serves": "TEST DOUBLE serves the course outcome",
+      "prerequisites": [
+       {
+        "name": "Basic reading",
+        "support": "Pair them up."
+       }
+      ],
+      "prerequisites_note": "",
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a constraint"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a constraint"
+       }
+      ],
+      "preparation": {
+       "minutes": 20,
+       "steps": [
+        "Print the task sheet."
+       ]
+      },
+      "activities": [
+       {
+        "kind": "setup",
+        "title": "TEST DOUBLE Set up",
+        "goal": "TEST DOUBLE goal for Set up",
+        "minutes": 5,
+        "instructions": [],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "try",
+        "title": "TEST DOUBLE First attempt",
+        "goal": "TEST DOUBLE goal for First attempt",
+        "minutes": 45,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "TEST DOUBLE handout made in session 1",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "feedback",
+        "title": "TEST DOUBLE Feedback in pairs",
+        "goal": "TEST DOUBLE goal for Feedback in pairs",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "TEST DOUBLE a worked example",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [
+         {
+          "belief": "a column is a row",
+          "response": "show one"
+         }
+        ],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "revise",
+        "title": "TEST DOUBLE Improve it",
+        "goal": "TEST DOUBLE goal for Improve it",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       }
+      ],
+      "success_criteria": [
+       "Criterion one is visible.",
+       "Criterion two is visible."
+      ],
+      "application_check": {
+       "when": "One week later",
+       "task": "TEST DOUBLE a changed task",
+       "looks_for": [
+        "Done without help"
+       ]
+      },
+      "claims": [
+       {
+        "text": "TEST DOUBLE a teaching judgement",
+        "type": "hypothesis",
+        "sources": [],
+        "support": "not_from_source",
+        "note": ""
+       },
+       {
+        "text": "TEST DOUBLE a fact from a source",
+        "type": "fact",
+        "sources": [
+         "S1"
+        ],
+        "support": "stated_by_source",
+        "note": ""
+       }
+      ],
+      "assumptions": [
+       "A room with tables."
+      ],
+      "teaches_nodes": [
+       "N3",
+       "N5"
+      ],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        {
+         "title": "Alone",
+         "minutes": 30,
+         "instructions": [
+          "Do a.",
+          "Do b."
+         ],
+         "handout": "sheet",
+         "self_check": [
+          "Check"
+         ],
+         "deliverable": "a file, sent to the shared folder"
+        }
+       ]
+      },
+      "project_work": [],
+      "assets": [
+       {
+        "name": "data.csv",
+        "kind": "dataset",
+        "language": "",
+        "purpose": "TEST DOUBLE synthetic practice data, not real measurements",
+        "provenance": "synthetic_practice",
+        "source_id": "",
+        "run": "no_run",
+        "expected_output": "",
+        "content": "a,b\n1,2\n3,4\n5,6\n"
+       },
+       {
+        "name": "count.py",
+        "kind": "code",
+        "language": "python",
+        "purpose": "count rows",
+        "provenance": "authored",
+        "source_id": "",
+        "run": "run",
+        "expected_output": "rows 3",
+        "content": "import csv\nrows = list(csv.DictReader(open('data.csv')))\nprint('rows', len(rows))\n"
+       }
+      ]
+     },
+     "assetChecks": [
+      {
+       "name": "count.py",
+       "kind": "code",
+       "check": "run",
+       "state": "ran",
+       "reason": "",
+       "output": "rows 3\n",
+       "error": "",
+       "python": "/opt/homebrew/bin/python3.14",
+       "made": [],
+       "level": "executed"
+      }
+     ]
+    },
+    {
+     "status": "done",
+     "startedAt": "2026-09-29T13:27:24Z",
+     "problems": [],
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE session 2",
+      "outcome": "TEST DOUBLE outcome using Python, Charts",
+      "serves": "TEST DOUBLE serves the course outcome",
+      "prerequisites": [
+       {
+        "name": "Basic reading",
+        "support": "Pair them up."
+       }
+      ],
+      "prerequisites_note": "",
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a constraint"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a constraint"
+       }
+      ],
+      "preparation": {
+       "minutes": 20,
+       "steps": [
+        "Print the task sheet."
+       ]
+      },
+      "activities": [
+       {
+        "kind": "setup",
+        "title": "TEST DOUBLE Set up",
+        "goal": "TEST DOUBLE goal for Set up",
+        "minutes": 5,
+        "instructions": [],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "try",
+        "title": "TEST DOUBLE First attempt",
+        "goal": "TEST DOUBLE goal for First attempt",
+        "minutes": 45,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "TEST DOUBLE handout made in session 2",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "feedback",
+        "title": "TEST DOUBLE Feedback in pairs",
+        "goal": "TEST DOUBLE goal for Feedback in pairs",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "TEST DOUBLE a worked example",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [
+         {
+          "belief": "a column is a row",
+          "response": "show one"
+         }
+        ],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "revise",
+        "title": "TEST DOUBLE Improve it",
+        "goal": "TEST DOUBLE goal for Improve it",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       }
+      ],
+      "success_criteria": [
+       "Criterion one is visible.",
+       "Criterion two is visible."
+      ],
+      "application_check": {
+       "when": "One week later",
+       "task": "TEST DOUBLE a changed task",
+       "looks_for": [
+        "Done without help"
+       ]
+      },
+      "claims": [
+       {
+        "text": "TEST DOUBLE a teaching judgement",
+        "type": "hypothesis",
+        "sources": [],
+        "support": "not_from_source",
+        "note": ""
+       },
+       {
+        "text": "TEST DOUBLE a fact from a source",
+        "type": "fact",
+        "sources": [
+         "S1"
+        ],
+        "support": "stated_by_source",
+        "note": ""
+       }
+      ],
+      "assumptions": [
+       "A room with tables."
+      ],
+      "teaches_nodes": [
+       "N1"
+      ],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        {
+         "title": "Alone",
+         "minutes": 30,
+         "instructions": [
+          "Do a.",
+          "Do b."
+         ],
+         "handout": "sheet",
+         "self_check": [
+          "Check"
+         ],
+         "deliverable": "a file, sent to the shared folder"
+        }
+       ]
+      },
+      "project_work": [],
+      "assets": []
+     },
+     "assetChecks": []
+    },
+    {
+     "status": "done",
+     "startedAt": "2026-09-29T13:27:24Z",
+     "problems": [],
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE session 3",
+      "outcome": "TEST DOUBLE outcome using Python, Charts",
+      "serves": "TEST DOUBLE serves the course outcome",
+      "prerequisites": [
+       {
+        "name": "Basic reading",
+        "support": "Pair them up."
+       }
+      ],
+      "prerequisites_note": "",
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a constraint"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a constraint"
+       }
+      ],
+      "preparation": {
+       "minutes": 20,
+       "steps": [
+        "Print the task sheet."
+       ]
+      },
+      "activities": [
+       {
+        "kind": "setup",
+        "title": "TEST DOUBLE Set up",
+        "goal": "TEST DOUBLE goal for Set up",
+        "minutes": 5,
+        "instructions": [],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "try",
+        "title": "TEST DOUBLE First attempt",
+        "goal": "TEST DOUBLE goal for First attempt",
+        "minutes": 45,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "TEST DOUBLE handout made in session 3",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "feedback",
+        "title": "TEST DOUBLE Feedback in pairs",
+        "goal": "TEST DOUBLE goal for Feedback in pairs",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "TEST DOUBLE a worked example",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [
+         {
+          "belief": "a column is a row",
+          "response": "show one"
+         }
+        ],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "revise",
+        "title": "TEST DOUBLE Improve it",
+        "goal": "TEST DOUBLE goal for Improve it",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       }
+      ],
+      "success_criteria": [
+       "Criterion one is visible.",
+       "Criterion two is visible."
+      ],
+      "application_check": {
+       "when": "One week later",
+       "task": "TEST DOUBLE a changed task",
+       "looks_for": [
+        "Done without help"
+       ]
+      },
+      "claims": [
+       {
+        "text": "TEST DOUBLE a teaching judgement",
+        "type": "hypothesis",
+        "sources": [],
+        "support": "not_from_source",
+        "note": ""
+       },
+       {
+        "text": "TEST DOUBLE a fact from a source",
+        "type": "fact",
+        "sources": [
+         "S1"
+        ],
+        "support": "stated_by_source",
+        "note": ""
+       }
+      ],
+      "assumptions": [
+       "A room with tables."
+      ],
+      "teaches_nodes": [
+       "N2"
+      ],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        {
+         "title": "Alone",
+         "minutes": 30,
+         "instructions": [
+          "Do a.",
+          "Do b."
+         ],
+         "handout": "sheet",
+         "self_check": [
+          "Check"
+         ],
+         "deliverable": "a file, sent to the shared folder"
+        }
+       ]
+      },
+      "project_work": [
+       {
+        "project": "P1",
+        "milestone": "m",
+        "what_learners_do": "work"
+       }
+      ],
+      "assets": []
+     },
+     "assetChecks": []
+    },
+    {
+     "status": "done",
+     "startedAt": "2026-09-29T13:27:24Z",
+     "problems": [],
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE session 4",
+      "outcome": "TEST DOUBLE outcome using Python, Charts",
+      "serves": "TEST DOUBLE serves the course outcome",
+      "prerequisites": [
+       {
+        "name": "Basic reading",
+        "support": "Pair them up."
+       }
+      ],
+      "prerequisites_note": "",
+      "contributions": [
+       {
+        "topic": "Python",
+        "gives": "TEST DOUBLE Python gives a constraint"
+       },
+       {
+        "topic": "Charts",
+        "gives": "TEST DOUBLE Charts gives a constraint"
+       }
+      ],
+      "preparation": {
+       "minutes": 20,
+       "steps": [
+        "Print the task sheet."
+       ]
+      },
+      "activities": [
+       {
+        "kind": "setup",
+        "title": "TEST DOUBLE Set up",
+        "goal": "TEST DOUBLE goal for Set up",
+        "minutes": 5,
+        "instructions": [],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "try",
+        "title": "TEST DOUBLE First attempt",
+        "goal": "TEST DOUBLE goal for First attempt",
+        "minutes": 45,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "TEST DOUBLE handout made in session 4",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "feedback",
+        "title": "TEST DOUBLE Feedback in pairs",
+        "goal": "TEST DOUBLE goal for Feedback in pairs",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "TEST DOUBLE a worked example",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [
+         {
+          "belief": "a column is a row",
+          "response": "show one"
+         }
+        ],
+        "success": [
+         "The work shows it."
+        ]
+       },
+       {
+        "kind": "revise",
+        "title": "TEST DOUBLE Improve it",
+        "goal": "TEST DOUBLE goal for Improve it",
+        "minutes": 5,
+        "instructions": [
+         "Step one.",
+         "Step two."
+        ],
+        "materials": [
+         "Paper"
+        ],
+        "handout": "",
+        "worked_example": "",
+        "teacher": [
+         "Watch for confusion."
+        ],
+        "misconceptions": [],
+        "success": [
+         "The work shows it."
+        ]
+       }
+      ],
+      "success_criteria": [
+       "Criterion one is visible.",
+       "Criterion two is visible."
+      ],
+      "application_check": {
+       "when": "One week later",
+       "task": "TEST DOUBLE a changed task",
+       "looks_for": [
+        "Done without help"
+       ]
+      },
+      "claims": [
+       {
+        "text": "TEST DOUBLE a teaching judgement",
+        "type": "hypothesis",
+        "sources": [],
+        "support": "not_from_source",
+        "note": ""
+       },
+       {
+        "text": "TEST DOUBLE a fact from a source",
+        "type": "fact",
+        "sources": [
+         "S1"
+        ],
+        "support": "stated_by_source",
+        "note": ""
+       }
+      ],
+      "assumptions": [
+       "A room with tables."
+      ],
+      "teaches_nodes": [],
+      "independent_work": {
+       "minutes": 30,
+       "tasks": [
+        {
+         "title": "Alone",
+         "minutes": 30,
+         "instructions": [
+          "Do a.",
+          "Do b."
+         ],
+         "handout": "sheet",
+         "self_check": [
+          "Check"
+         ],
+         "deliverable": "a file, sent to the shared folder"
+        }
+       ]
+      },
+      "project_work": [
+       {
+        "project": "P2",
+        "milestone": "m",
+        "what_learners_do": "work"
+       }
+      ],
+      "assets": []
+     },
+     "assetChecks": []
+    }
+   ]
+  },
+  "review": {
+   "status": "done",
+   "inputOrigin": "generated",
+   "inputFingerprint": "jomc6g.a0h",
+   "requestId": "25e6684e84de6ff7",
+   "startedAt": "2026-09-29T13:27:24Z",
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "output": {
+    "areas": [
+     {
+      "area": "sources",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE sources"
+     },
+     {
+      "area": "feasibility",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE feasibility"
+     },
+     {
+      "area": "topic_connections",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE topic_connections"
+     },
+     {
+      "area": "assessment_alignment",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE assessment_alignment"
+     },
+     {
+      "area": "timing",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE timing"
+     },
+     {
+      "area": "clarity",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE clarity"
+     },
+     {
+      "area": "continuity",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE continuity"
+     },
+     {
+      "area": "constraints",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE constraints"
+     },
+     {
+      "area": "foundations",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE foundations"
+     },
+     {
+      "area": "projects",
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE projects"
+     }
+    ],
+    "findings": [
+     {
+      "severity": "should_fix",
+      "area": "projects",
+      "session": 0,
+      "project": "P1",
+      "finding": "TEST DOUBLE finding",
+      "suggestion": "TEST DOUBLE suggestion"
+     }
+    ],
+    "teacher_could_run_it": {
+     "answer": "with_changes",
+     "why": "TEST DOUBLE why"
+    }
+   },
+   "reviewed": 4
+  },
+  "map": {
+   "status": "done",
+   "startedAt": "2026-09-29T13:26:40Z",
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "output": {
+    "nodes": [
+     {
+      "id": "N1",
+      "name": "Python",
+      "kind": "requested",
+      "role": "required",
+      "why_needed": "",
+      "needed_by": [
+       "OUTCOME"
+      ],
+      "requires": [
+       "N3",
+       "N5"
+      ],
+      "depth": "applied",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 60,
+      "needs_evidence": true,
+      "research_questions": [
+       "q1"
+      ]
+     },
+     {
+      "id": "N2",
+      "name": "Charts",
+      "kind": "requested",
+      "role": "required",
+      "why_needed": "",
+      "needed_by": [
+       "OUTCOME"
+      ],
+      "requires": [
+       "N3"
+      ],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 40,
+      "needs_evidence": true,
+      "research_questions": [
+       "q2"
+      ]
+     },
+     {
+      "id": "N3",
+      "name": "Reading a table",
+      "kind": "foundation",
+      "role": "required",
+      "why_needed": "TEST DOUBLE both topics start from a table",
+      "needed_by": [
+       "N1",
+       "N2"
+      ],
+      "requires": [
+       "N4"
+      ],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 30,
+      "needs_evidence": true,
+      "research_questions": [
+       "q3"
+      ]
+     },
+     {
+      "id": "N4",
+      "name": "Files and folders",
+      "kind": "foundation",
+      "role": "already_known",
+      "why_needed": "TEST DOUBLE learners can already open a file",
+      "needed_by": [
+       "N3"
+      ],
+      "requires": [],
+      "depth": "awareness",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 10,
+      "needs_evidence": false,
+      "research_questions": []
+     },
+     {
+      "id": "N5",
+      "name": "Counting rows",
+      "kind": "foundation",
+      "role": "required",
+      "why_needed": "TEST DOUBLE reviewer says it is missing",
+      "needed_by": [
+       "N1"
+      ],
+      "requires": [],
+      "depth": "working",
+      "entry_reached": true,
+      "below_entry": "",
+      "est_minutes": 15,
+      "needs_evidence": true,
+      "research_questions": [],
+      "addedBy": "foundation review"
+     }
+    ],
+    "outcome_needs": [
+     {
+      "capability": "read a table",
+      "nodes": [
+       "N3"
+      ]
+     }
+    ],
+    "assumed_entry": [
+     "can open a file"
+    ],
+    "stop_reason": "TEST DOUBLE reached the entry level",
+    "unresolved": [],
+    "derived": {
+     "order": [
+      "N4",
+      "N5",
+      "N3",
+      "N1",
+      "N2"
+     ],
+     "levels": {
+      "N4": 1,
+      "N5": 1,
+      "N3": 2,
+      "N1": 3,
+      "N2": 3
+     },
+     "requiredMinutes": 145,
+     "optionalMinutes": 0,
+     "openGaps": []
+    }
+   },
+   "fingerprint": "1726dn6.12z",
+   "revisedByReview": [
+    "Counting rows"
+   ]
+  },
+  "foundation_review": {
+   "status": "done",
+   "startedAt": "2026-09-29T13:26:40Z",
+   "requestId": "56928a54b82b7b7b",
+   "inputFingerprint": "61v7ow.mv",
+   "addedNodes": [
+    "Counting rows"
+   ],
+   "rejectedAdditions": [],
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "output": {
+    "verdict": "gaps",
+    "summary": "TEST DOUBLE foundations",
+    "missing_foundations": [
+     {
+      "name": "Counting rows",
+      "kind": "foundation",
+      "why_needed": "TEST DOUBLE reviewer says it is missing",
+      "needed_by": [
+       "N1"
+      ],
+      "requires": [],
+      "est_minutes": 15
+     }
+    ],
+    "unneeded": [],
+    "ordering_problems": [],
+    "depth_problems": [],
+    "duplicates": []
+   },
+   "appliedToFingerprint": "1726dn6.12z"
+  },
+  "source_review": {
+   "status": "done",
+   "rounds": [
+    {
+     "requestId": "8767e0ba2a5d85b8",
+     "inputFingerprint": "j610ek.s6",
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double",
+     "output": {
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE audit",
+      "sources": [
+       {
+        "id": "S1",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       },
+       {
+        "id": "S2",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       },
+       {
+        "id": "S3",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       }
+      ],
+      "conflicts": [],
+      "node_gaps": [],
+      "targeted_research": [
+       {
+        "node": "N3",
+        "question": "TEST DOUBLE what is a table?",
+        "why": "gap"
+       }
+      ]
+     },
+     "finalRound": false,
+     "sourcesJudged": 3,
+     "targetedAsked": [
+      {
+       "node": "N3",
+       "question": "TEST DOUBLE what is a table?",
+       "why": "gap"
+      }
+     ],
+     "targetedDone": true
+    },
+    {
+     "requestId": "ab465ba34ddb14b7",
+     "inputFingerprint": "w2s2dn.11p",
+     "finishedAt": "2026-09-29T13:26:40Z",
+     "model": "test-double",
+     "output": {
+      "verdict": "concerns",
+      "summary": "TEST DOUBLE audit",
+      "sources": [
+       {
+        "id": "S1",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       },
+       {
+        "id": "S2",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       },
+       {
+        "id": "S3",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       },
+       {
+        "id": "S4",
+        "supports_claim": "yes",
+        "reason": "TEST DOUBLE reason"
+       }
+      ],
+      "conflicts": [],
+      "node_gaps": [],
+      "targeted_research": []
+     },
+     "finalRound": true,
+     "sourcesJudged": 4,
+     "targetedAsked": []
+    }
+   ],
+   "finishedAt": "2026-09-29T13:26:40Z"
+  },
+  "outline_review": {
+   "status": "done",
+   "rounds": [
+    {
+     "requestId": "33bbbee07f67028c",
+     "inputFingerprint": "1x8cews.2pe",
+     "finishedAt": "2026-09-29T13:27:08Z",
+     "model": "test-double",
+     "output": {
+      "verdict": "sound",
+      "summary": "TEST DOUBLE feasibility",
+      "findings": [],
+      "project_checks": [
+       {
+        "project": "P1",
+        "feasible": "yes",
+        "why": "ok"
+       }
+      ],
+      "time_verdict": {
+       "fits": true,
+       "why": "ok"
+      }
+     }
+    }
+   ],
+   "output": {
+    "verdict": "sound",
+    "summary": "TEST DOUBLE feasibility",
+    "findings": [],
+    "project_checks": [
+     {
+      "project": "P1",
+      "feasible": "yes",
+      "why": "ok"
+     }
+    ],
+    "time_verdict": {
+     "fits": true,
+     "why": "ok"
+    }
+   },
+   "inputFingerprint": "1x8cews.2pe",
+   "requestId": "33bbbee07f67028c",
+   "finishedAt": "2026-09-29T13:27:08Z",
+   "appliedToFingerprint": "1x8cews.2pe",
+   "unresolvedMustFix": 0
+  },
+  "projects": {
+   "status": "done",
+   "units": [
+    {
+     "status": "done",
+     "outline": {
+      "id": "P1",
+      "kind": "minor",
+      "title": "TEST DOUBLE minor project",
+      "purpose": "practise",
+      "nodes_required": [
+       "N3"
+      ],
+      "available_after_session": 2,
+      "hosted_in_sessions": [
+       3
+      ],
+      "milestones": [
+       {
+        "session": 3,
+        "what": "draft"
+       }
+      ],
+      "deliverable": "a table",
+      "minutes": {
+       "live": 20,
+       "independent": 20
+      }
+     },
+     "startedAt": "2026-09-29T13:27:24Z",
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE minor project",
+      "kind": "minor",
+      "purpose": "TEST DOUBLE purpose",
+      "learner_brief": "TEST DOUBLE the whole brief",
+      "prerequisites": [
+       {
+        "node": "N3",
+        "name": "N3",
+        "taught_in_session": 1
+       }
+      ],
+      "inputs": [],
+      "milestones": [
+       {
+        "when": "week 1",
+        "session": 2,
+        "what": "first",
+        "minutes": 30,
+        "check": "look"
+       },
+       {
+        "when": "week 2",
+        "session": 2,
+        "what": "second",
+        "minutes": 10,
+        "check": "look"
+       }
+      ],
+      "deliverables": [
+       "a file"
+      ],
+      "time": {
+       "live": 20,
+       "independent": 20
+      },
+      "rubric": [
+       {
+        "criterion": "accuracy",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       },
+       {
+        "criterion": "limits",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       },
+       {
+        "criterion": "clarity",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       }
+      ],
+      "example_or_solution_guidance": "TEST DOUBLE guidance",
+      "solution_assets": [],
+      "feedback_route": "a peer, by Friday",
+      "revision_route": "revise and resend",
+      "teacher_guidance": [
+       "watch"
+      ],
+      "common_errors": [
+       {
+        "belief": "b",
+        "response": "r"
+       }
+      ],
+      "claims": [],
+      "assumptions": []
+     },
+     "assetChecks": []
+    },
+    {
+     "status": "done",
+     "outline": {
+      "id": "P2",
+      "kind": "major",
+      "title": "TEST DOUBLE capstone",
+      "purpose": "integrate",
+      "nodes_required": [
+       "N1",
+       "N2",
+       "N3"
+      ],
+      "available_after_session": 3,
+      "hosted_in_sessions": [
+       4
+      ],
+      "milestones": [
+       {
+        "session": 4,
+        "what": "hand in"
+       }
+      ],
+      "deliverable": "a report",
+      "minutes": {
+       "live": 30,
+       "independent": 40
+      }
+     },
+     "startedAt": "2026-09-29T13:27:24Z",
+     "finishedAt": "2026-09-29T13:27:24Z",
+     "model": "test-double",
+     "output": {
+      "title": "TEST DOUBLE capstone",
+      "kind": "major",
+      "purpose": "TEST DOUBLE purpose",
+      "learner_brief": "TEST DOUBLE the whole brief",
+      "prerequisites": [
+       {
+        "node": "N1",
+        "name": "N1",
+        "taught_in_session": 1
+       },
+       {
+        "node": "N2",
+        "name": "N2",
+        "taught_in_session": 1
+       },
+       {
+        "node": "N3",
+        "name": "N3",
+        "taught_in_session": 1
+       }
+      ],
+      "inputs": [],
+      "milestones": [
+       {
+        "when": "week 1",
+        "session": 3,
+        "what": "first",
+        "minutes": 60,
+        "check": "look"
+       },
+       {
+        "when": "week 2",
+        "session": 3,
+        "what": "second",
+        "minutes": 10,
+        "check": "look"
+       }
+      ],
+      "deliverables": [
+       "a file"
+      ],
+      "time": {
+       "live": 30,
+       "independent": 40
+      },
+      "rubric": [
+       {
+        "criterion": "accuracy",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       },
+       {
+        "criterion": "limits",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       },
+       {
+        "criterion": "clarity",
+        "levels": [
+         {
+          "level": "low",
+          "descriptor": "TEST DOUBLE low"
+         },
+         {
+          "level": "mid",
+          "descriptor": "TEST DOUBLE mid"
+         },
+         {
+          "level": "high",
+          "descriptor": "TEST DOUBLE high"
+         }
+        ]
+       }
+      ],
+      "example_or_solution_guidance": "TEST DOUBLE guidance",
+      "solution_assets": [],
+      "feedback_route": "a peer, by Friday",
+      "revision_route": "revise and resend",
+      "teacher_guidance": [
+       "watch"
+      ],
+      "common_errors": [
+       {
+        "belief": "b",
+        "response": "r"
+       }
+      ],
+      "claims": [],
+      "assumptions": []
+     },
+     "assetChecks": []
+    }
+   ]
+  }
+ },
+ "edits": {},
+ "calls": [
+  {
+   "stage": "map",
+   "unit": "map",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "foundation_review",
+   "unit": "foundation_review",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "research",
+   "unit": "research-approach",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 1,
+   "askedFor": 1,
+   "searched": 1,
+   "problems": []
+  },
+  {
+   "stage": "research",
+   "unit": "research-nodes-1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 1,
+   "askedFor": 1,
+   "searched": 1,
+   "problems": []
+  },
+  {
+   "stage": "research",
+   "unit": "research-nodes-2",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 1,
+   "askedFor": 1,
+   "searched": 1,
+   "problems": []
+  },
+  {
+   "stage": "source_review",
+   "unit": "source_review-1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "research",
+   "unit": "research-targeted-1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 1,
+   "askedFor": 1,
+   "searched": 1,
+   "problems": []
+  },
+  {
+   "stage": "source_review",
+   "unit": "source_review-2",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "outline",
+   "unit": "outline",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": [
+    "The required topic \u201cCounting rows\u201d (N5) is not taught in any session. Teach it before what needs it, or, if the time truly cannot hold it, list it under 'deferred' with the reason AND set time_conflict.exists to true. Never drop a foundation quietly.",
+    "\u201cPython\u201d needs \u201cCounting rows\u201d, which no session teaches."
+   ]
+  },
+  {
+   "stage": "outline",
+   "unit": "outline",
+   "attempt": 2,
+   "startedAt": "2026-09-29T13:26:40Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:26:40Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": [
+    "The required topic \u201cCounting rows\u201d (N5) is not taught in any session. Teach it before what needs it, or, if the time truly cannot hold it, list it under 'deferred' with the reason AND set time_conflict.exists to true. Never drop a foundation quietly.",
+    "\u201cPython\u201d needs \u201cCounting rows\u201d, which no session teaches."
+   ]
+  },
+  {
+   "stage": "outline",
+   "unit": "outline",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:08Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:08Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "outline_review",
+   "unit": "outline_review-1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:08Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:08Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "materials",
+   "unit": "session-1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "materials",
+   "unit": "session-2",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "materials",
+   "unit": "session-3",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "materials",
+   "unit": "session-4",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "project",
+   "unit": "project-P1",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "project",
+   "unit": "project-P2",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  },
+  {
+   "stage": "review",
+   "unit": "review",
+   "attempt": 1,
+   "startedAt": "2026-09-29T13:27:24Z",
+   "ok": true,
+   "finishedAt": "2026-09-29T13:27:24Z",
+   "model": "test-double",
+   "seconds": 0.0,
+   "turns": 2,
+   "usage": {
+    "input": 10,
+    "output": 20
+   },
+   "opened": 0,
+   "askedFor": 0,
+   "searched": 0,
+   "problems": []
+  }
+ ],
+ "pipeline": 2,
+ "policy": {
+  "minor": 1,
+  "major": 1,
+  "note": "One practice project, and one project that pulls the skills together."
+ },
+ "accounting": {
+  "liveMinutes": 240,
+  "independentMinutes": 120,
+  "combinedMinutes": 360,
+  "statement": "4 h live + 2 h independent = 6 h. Each hour is counted once."
+ },
+ "savedAt": "2026-09-29T13:27:24Z",
+ "draft": {}
+}
