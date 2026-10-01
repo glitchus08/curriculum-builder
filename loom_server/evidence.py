@@ -765,6 +765,12 @@ def original_status(source: dict, attribution_verdict: str | None) -> dict:
     # appeared beside a work the graph was holding at an unresolved identity, because this looked only at the
     # aggregate verdict, which still reads "yes" while two runs contradict each other about who made the work.
     att = source.get("attribution")
+    # Incomplete history is uncertainty about this very source, so it cannot leave the badge saying verified.
+    # Adding the flag and letting `verified` stand would be a warning nobody acts on, which is worse than none.
+    gap = (att or {}).get("historyIncomplete") if isinstance(att, dict) else None
+    if gap:
+        why.append("part of this source's earlier history is missing or unreadable, so an earlier disagreement "
+                   "about it cannot be ruled out")
     live = (att or {}).get("unresolvedDisagreements") if isinstance(att, dict) else None
     if live:
         if not isinstance(live, list):

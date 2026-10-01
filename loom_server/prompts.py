@@ -257,6 +257,9 @@ SOURCES_NOTE = (
     "letters differ in case: in code, units or symbols that can change the meaning, so do not call it exact.\n"
     "- 'who_made_it' and 'lineage' are claims about identity and descent that a separate review judged. An unjudged or "
     "refused one is not established.\n"
+    "- 'part_of_this_sources_history_is_missing' means Loom cannot read all of this source's earlier judgements, so "
+    "it cannot tell you whether an earlier review disagreed about it. Treat the source as unsettled: do not present "
+    "what rests on it as established.\n"
     "- 'the_attribution_review_disagrees_with_itself' means two runs of that review gave different answers to the same "
     "question on the same evidence, and nobody has decided between them yet. It is NOT a weaker yes and it is NOT a no. "
     "Do not present anything resting on it as established, and do not pick the answer that suits the lesson: say the "
@@ -384,6 +387,10 @@ def sources_digest(research_out: dict | None, passage: int = 700, summary: int =
             row["attribution_review_verdict"] = (s["attribution"] or {}).get("verdict")
             # A writer shown only the aggregate verdict cannot tell a settled claim from a contested one, and a
             # contested claim reads as settled. What is in dispute travels with the source.
+            if gap := (s["attribution"] or {}).get("historyIncomplete"):
+                row["part_of_this_sources_history_is_missing"] = {
+                    "expectedArchived": gap.get("expectedArchived"), "couldRead": gap.get("couldRead"),
+                    "why": gap.get("why")}
             live = (s["attribution"] or {}).get("unresolvedDisagreements")
             if live:
                 row["the_attribution_review_disagrees_with_itself"] = [

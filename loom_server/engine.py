@@ -9,6 +9,7 @@ Rules this module keeps:
 from __future__ import annotations
 
 import base64
+import copy
 import ipaddress
 import json
 import os
@@ -692,6 +693,48 @@ def apply_resolutions(entry: dict, resolutions) -> dict:
     return out
 
 
+def history_state(store, cid: str, rs: dict, claim_key: str) -> dict:
+    """What history Loom EXPECTS for one source against what it can actually read.
+
+    The archive marker says how many judgements were moved out of the inline index. Counting only what comes
+    back and asking no further questions meant a missing file, a truncated file and a refused symlink all read
+    as "no earlier judgements" — and a review then returned a confident `yes` with nothing to say about the
+    history it had failed to find. Unavailable history is not the absence of history.
+
+    Returns the usable entries and, where the count does not reconcile, exactly why.
+    """
+    marker = ((rs.get("attributionHistoryArchived") or {}).get(claim_key) or {})
+    expected = marker.get("count")
+    expected = expected if isinstance(expected, int) and expected >= 0 else 0
+    got, failed = [], None
+    try:
+        got = storage.read_archived_judgements(store, cid, claim_key)
+    except Exception as e:
+        failed = type(e).__name__
+    usable = [h for h in got if isinstance(h, dict) and not h.get("unreadable")]
+    unreadable = [h for h in got if not isinstance(h, dict) or h.get("unreadable")]
+    why = []
+    if failed:
+        why.append(f"the archive for this source could not be opened ({failed})")
+    elif expected and not got and not marker.get("file"):
+        why.append(f"{expected} earlier judgements were archived but no archive file is recorded")
+    elif expected and not got:
+        why.append(f"{expected} earlier judgements were archived but the archive reads as empty, which can mean "
+                   f"the file is missing or Loom refused the path it found")
+    elif len(usable) < expected:
+        why.append(f"{expected} earlier judgements were archived and only {len(usable)} can be read")
+    if unreadable:
+        why.append(f"{len(unreadable)} archived entries could not be read")
+    out = {"expected": expected, "readable": len(usable), "entries": usable}
+    if why:
+        out["incomplete"] = {
+            "expectedArchived": expected, "couldRead": len(usable), "why": why,
+            "note": ("Part of this source's earlier history is missing or unreadable, so Loom cannot say there "
+                     "was no earlier disagreement about it. This is NOT a statement that there was none, and "
+                     "nothing resting on it should be presented as settled.")}
+    return out
+
+
 def disagreement_revision(entry: dict, d: dict) -> str:
     """A name for one open question AS IT STANDS, so a decision can say which version of it was answered.
 
@@ -703,13 +746,47 @@ def disagreement_revision(entry: dict, d: dict) -> str:
                           d.get("earlierRunId"), d.get("laterRunId")])
 
 
-def open_questions(entry: dict) -> list:
-    """The open disagreements on one judgement, each with the revision a decision must name."""
+def open_questions(entry: dict, resolutions=None) -> list:
+    """The open disagreements on one judgement, each with the revision a decision must name.
+
+    Where a question was decided before and has reopened — the evidence moved, or the review answered
+    differently again — the id of that earlier decision travels with it as `replacing`. Without it the screen
+    could offer no honest way to supersede a decision: the server requires the id of the one you saw, and
+    nothing was telling the page what that id was.
+    """
+    held = resolutions if isinstance(resolutions, dict) else {}
     out = []
     for d in entry.get("unresolvedDisagreements") or []:
         if isinstance(d, dict) and d.get("key"):
-            out.append(dict(d, revision=disagreement_revision(entry, d)))
+            q = dict(d, revision=disagreement_revision(entry, d))
+            prior = held.get(d["key"])
+            if isinstance(prior, dict) and prior.get("decisionId"):
+                q["replacing"] = prior["decisionId"]
+                q["previousDecision"] = {"chosen": prior.get("chosen"), "by": prior.get("by"),
+                                         "at": prior.get("at"), "reason": prior.get("reason"),
+                                         "becauseWords": prior.get("becauseWords")}
+            out.append(q)
     return out
+
+
+def effective_attribution(rs: dict, claim_key: str, store=None, cid: str | None = None) -> dict | None:
+    """One source's judgement as it now stands: decisions applied, open questions named, history attached.
+
+    Anything that renders a source needs this same view. Building it in one place is what stops a screen, an
+    export and a writer digest from each telling a different story about the same claim.
+    """
+    entry = (rs.get("attribution") or {}).get(claim_key)
+    if not isinstance(entry, dict):
+        return None
+    av = apply_resolutions(entry, (rs.get("attributionResolutions") or {}).get(claim_key))
+    if store is not None and cid:
+        hs = history_state(store, cid, rs, claim_key)
+        av = dict(av, historyIncomplete=hs["incomplete"]) if hs.get("incomplete") else \
+            {k: v for k, v in av.items() if k != "historyIncomplete"}
+    if av.get("unresolvedDisagreements"):
+        av = dict(av, unresolvedDisagreements=open_questions(
+            av, (rs.get("attributionResolutions") or {}).get(claim_key)))
+    return av
 
 
 def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict) -> dict:
@@ -741,7 +818,8 @@ def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict
         entry = (rs.get("attribution") or {}).get(claim_key)
         if not isinstance(entry, dict):
             raise storage.StoreError("Loom has no attribution judgement for that source.")
-        d = next((x for x in open_questions(entry) if x["key"] == dkey), None)
+        d = next((x for x in open_questions(entry, (rs.get("attributionResolutions") or {}).get(claim_key))
+                  if x["key"] == dkey), None)
         if d is None:
             raise storage.StoreError("There is no open disagreement about that to decide.")
         if not all(want.values()):
@@ -776,20 +854,35 @@ def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict
             now["replaces"] = held["decisionId"]
         events.append(dict(now))
         rs.setdefault("attributionResolutions", {}).setdefault(claim_key, {})[dkey] = dict(now)
+        # The stored judgement stays RAW. Writing the effective view back over it looked tempting — a reader
+        # that goes straight to the record would see the decision — but it destroys what the model actually
+        # answered, which every later re-derivation needs, and removes the question a second decision has to
+        # find. The effective view is computed for readers instead, never stored in its place.
         rec.setdefault("stages", {}).setdefault("research", rs)
         # The merge belongs INSIDE this transaction. Doing it afterwards meant reading the record again, merging,
         # and writing — and any decision saved by someone else between that read and that write was overwritten
         # by a record that predated it. Both callers were told they had succeeded and only one survived. The
         # record is already in hand here, so the derived state is rebuilt from it and written with it, once.
         if rs.get("batches"):
+            # Derived into a COPY first. Merging in place and catching the exception published whatever the
+            # failed merge had already mutated: a half-rebuilt research output was saved beside a warning, so
+            # the warning sat on top of data that had actually changed. A merge that does not finish now
+            # changes nothing, and the decision — which is the deliverable — still stands.
+            candidate = copy.deepcopy(rec)
             try:
-                runner(store, cid)._merge_research(rec)
+                runner(store, cid)._merge_research(candidate)
             except Exception as e:
-                # The decision is the deliverable; derived state is rebuilt on the next merge. Say so rather
-                # than fail a decision that is otherwise sound, and never leave a half-merged record behind.
-                rec["derivedStateStale"] = {"at": storage.now_iso(), "because": type(e).__name__,
-                                            "note": "A decision was recorded but the views built from it could "
-                                                    "not be rebuilt in the same step. Re-open the course."}
+                rec["derivedStateStale"] = {
+                    "at": storage.now_iso(), "because": type(e).__name__,
+                    "note": ("A decision was recorded and nothing else was changed: the views built from it "
+                             "could not be rebuilt, so none of that rebuild was kept. The decision stands and "
+                             "these views are out of date until it succeeds.")}
+            else:
+                for k in ("stages", "now", "status"):
+                    if k in candidate:
+                        rec[k] = candidate[k]
+                # Cleared only after a rebuild that actually finished, so the marker means what it says.
+                rec.pop("derivedStateStale", None)
         else:
             rec.pop("derivedStateStale", None)
         return dict(now)
@@ -1432,10 +1525,19 @@ class Runner:
             # both a waste and a trap: the screen would keep showing a conflict that had already been settled.
             if av:
                 av = apply_resolutions(av, (st.get("attributionResolutions") or {}).get(ck))
+                # Reconciled on every read, not only when a review runs: an archive that goes missing after the
+                # last review is exactly the case a saved flag would not catch.
+                hs = history_state(self.store, self.cid, st, ck)
+                if hs.get("incomplete"):
+                    av = dict(av, historyIncomplete=hs["incomplete"])
+                else:
+                    av = {k: v for k, v in av.items() if k != "historyIncomplete"}
                 # Each open question travels with the name of its current version, so whatever is shown can be
                 # answered against exactly that and nothing else.
                 if av.get("unresolvedDisagreements"):
-                    av = dict(av, unresolvedDisagreements=open_questions(av))
+                    av = dict(av, unresolvedDisagreements=open_questions(
+                        av, (st.get("attributionResolutions") or {}).get(ck)),
+                        decisionHistory=decision_history(rec, ck))
             merged["sources"][i]["attribution"] = av or None
             # The claim key is what a decision is filed under, so the screen that offers the decision needs it.
             merged["sources"][i]["claimKey"] = ck
@@ -1901,12 +2003,10 @@ class Runner:
         snapshot = storage.save_request_snapshot(self.store, self.cid, request_print, dict(
             request, at=storage.now_iso(), stage="attribution_review", requestFingerprint=request_print,
             reviewerInputVersion=prompts.REVIEWER_INPUT_VERSION, sourcesInRequest=len(srcs), **execution))
-        # A fingerprint is a short hash, and a snapshot is written once and never replaced. If a DIFFERENT
-        # request ever lands on an existing name, the stored copy is not the one this run sent, and treating it
-        # as such would make a replay silently wrong. Say so rather than let the two be confused.
-        kept = storage.read_request_snapshot(self.store, self.cid, request_print)
-        collided = bool(kept) and (kept.get("prompt") != p or kept.get("system") != prompts.SYSTEM
-                                   or kept.get("schema") != schema or kept.get("settings") != settings)
+        # Two different requests can share a short fingerprint. Both are kept, each under its own name, and
+        # this run records the name of ITS OWN request so a replay reads the one that was actually sent.
+        first = storage.read_request_snapshot(self.store, self.cid, request_print)
+        collided = bool(first) and first.get("prompt") != p
         r = self.call(rec, "attribution_review", "attribution_review", "A separate check of who made each source and how they connect", p, schema)
         out = r["output"]
         ids = {s_["id"]: s_ for s_ in srcs}
@@ -1925,11 +2025,11 @@ class Runner:
         provenance = {"runId": run_id, "at": storage.now_iso(), "model": r["model"], "stage": "attribution_review",
                       "batchInputFingerprint": batch_print, "requestFingerprint": request_print,
                       "settingsFingerprint": content_print(settings), "settings": settings,
-                      "requestSnapshot": None if collided else snapshot,
-                      **({"requestSnapshotUnavailable": (
-                          "Another request is already stored under this fingerprint and its contents differ, so "
-                          "the stored copy is NOT this run's request. Nothing was overwritten; this run's "
-                          "request was not kept.")} if collided else {}),
+                      "requestSnapshot": snapshot,
+                      **({"fingerprintSharedWithAnotherRequest": (
+                          f"A different request is also stored under this fingerprint. Both are kept; this "
+                          f"run's own request is {snapshot}. Comparing runs on the fingerprint alone would "
+                          f"treat these two as the same ask, and they are not.")} if collided else {}),
                       "promptCharacters": len(p), "sourcesInRequest": len(srcs),
                       "reviewerInputVersion": prompts.REVIEWER_INPUT_VERSION, **execution}
 
@@ -1963,22 +2063,12 @@ class Runner:
             # archive beside the course, and reading only the window meant a conflict vanished the moment its
             # entries were evicted: come back to the same evidence later and the earlier contradiction was gone,
             # which is exactly the forgetting the archive exists to prevent.
-            archived = []
-            try:
-                archived = storage.read_archived_judgements(self.store, self.cid, claim_key)
-            except Exception:
-                archived = [{"unreadable": True}]
-            unreadable = [h for h in archived if not isinstance(h, dict) or h.get("unreadable")]
-            whole = [h for h in archived if isinstance(h, dict) and not h.get("unreadable")] + past
+            state = history_state(self.store, self.cid, rs, claim_key)
+            whole = state["entries"] + past
             same_input = [h for h in whole if h.get("fingerprint") == entry.get("fingerprint")]
             prev = same_input[-1] if same_input else None
-            if unreadable:
-                # Part of the history cannot be read, so Loom cannot say there was no earlier disagreement. That
-                # is recorded on the judgement rather than passed over in silence.
-                entry["historyIncomplete"] = {
-                    "archiveEntriesUnreadable": len(unreadable),
-                    "note": ("Some earlier judgements for this source could not be read, so an earlier "
-                             "disagreement cannot be ruled out. This is not a statement that there was none.")}
+            if state.get("incomplete"):
+                entry["historyIncomplete"] = state["incomplete"]
             live: dict = {}
             if prev is not None:
                 # A contradiction does not expire by being repeated. Answer yes, then no, then no again, and the

@@ -496,15 +496,24 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
     Written once and never rewritten: a snapshot that could be replaced is not a record of what was asked. The
     same request made by a hundred sources in one batch is one file, because it is one request.
     """
-    name = _fp_name(fingerprint) + ".json"
+    body = json.dumps(payload, indent=1, ensure_ascii=False)
+    base = _fp_name(fingerprint)
     with LOCK:
-        path = provenance_file(store, cid, "requests", name, make=True)
-        if path is None:
-            raise StoreError("Loom will not write that request into this course: the path is not a regular file "
-                             "of its own.")
-        if not path.exists():
-            write_atomic(path, json.dumps(payload, indent=1, ensure_ascii=False))
-    return name
+        for n in range(64):
+            # A fingerprint is a short hash, so two different requests can land on one name. Refusing the
+            # second and recording nothing lost the actual request that was sent — the one a replay would
+            # need. Both are kept now, under distinct names, and the run is told which one is ITS request.
+            name = f"{base}.json" if n == 0 else f"{base}-{n}.json"
+            path = provenance_file(store, cid, "requests", name, make=True)
+            if path is None:
+                raise StoreError("Loom will not write that request into this course: the path is not a regular "
+                                 "file of its own.")
+            if not path.exists():
+                write_atomic(path, body)
+                return name
+            if path.read_text(encoding="utf-8") == body:
+                return name          # the very same request, already kept once
+        raise StoreError("Too many different requests share this fingerprint in this course.")
 
 
 def read_request_snapshot(store, cid: str, fingerprint: str) -> dict | None:

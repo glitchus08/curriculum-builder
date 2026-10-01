@@ -230,6 +230,9 @@ def work_from_source(s: dict, canonical: dict | None = None) -> dict:
     # work it is. This is deliberately not a fourth origin status: the honest reading is that the origin is NOT
     # established, which is what `unknown` already says. What the extra field adds is why it is unknown — because
     # a person has to decide, not because nobody has looked.
+    if _attribution_of(s).get("historyIncomplete"):
+        why.append("part of this work's earlier attribution history is missing or unreadable, so an earlier "
+                   "disagreement about its identity cannot be ruled out")
     live_identity = [d for d in unresolved_disagreements(s) if d.get("aspect") in SOURCE_WIDE_ASPECTS]
     if live_identity:
         why.extend(_disagreement_why(d) for d in live_identity)
@@ -505,6 +508,9 @@ def judge_edge(edge: dict, s: dict, works: dict, text: str | None = None) -> dic
         said = "recorded nothing about it" if got is None else f"recorded {got!r}"
         why.append(f"the attribution review did not affirm the source's {label}: it {said}, and a relationship "
                    f"cannot rest on a source whose {label} is unconfirmed")
+    if _attribution_of(s).get("historyIncomplete"):
+        why.append("part of this source's earlier attribution history is missing or unreadable, so an earlier "
+                   "disagreement about this relationship cannot be ruled out")
     status = "supported" if not why else "unknown"
     # An unresolved disagreement is not outweighed by a clean-looking later answer. Where two runs gave different
     # answers to the same question on the same evidence and nobody has decided between them, the claim is held at

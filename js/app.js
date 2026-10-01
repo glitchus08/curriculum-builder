@@ -958,8 +958,15 @@ document.addEventListener('click', async e => {
       sawEvidence: box.dataset.evidence, sawRevision: box.dataset.revision,
       replacing: box.dataset.replacing || undefined,
       chosen: b.dataset.chosen, becauseWords: because, reason: why, by: 'the person at this computer' });
-    say('Decision recorded. Nothing was asked of Claude.');
+    // KNOWN GAP, deliberately not papered over: the journey keeps its own copy of each source and that copy
+    // is what this screen renders. The decision is recorded authoritatively in the course record and is served
+    // as `effectiveAttribution`, but this panel still shows the journey's older copy after a reload. Writing
+    // that copy back from here did not persist, so rather than ship a refresh that does not refresh, the
+    // decision is reported as recorded and the stale panel is named in the handoff.
+    say('Decision recorded. Nothing was asked of Claude. This panel may show the earlier answer until the '
+        + 'course is next rebuilt.');
     await pollEngine();
+    softRender();
   } catch (e) {
     box.querySelectorAll('[data-chosen]').forEach(x => { x.disabled = false; });
     say(e.message);

@@ -203,6 +203,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if rest == ["engine"] and method == "GET":
                 storage.course_dir(store, cid)
                 rec_ = engine.read(store, cid)
+                if isinstance(rec_, dict):
+                    # Judgements as they now stand — decisions applied, open questions named, history
+                    # attached — computed for readers and never written over the raw record.
+                    rs_ = ((rec_.get("stages") or {}).get("research") or {})
+                    eff = {k: engine.effective_attribution(rs_, k, store, cid)
+                           for k in (rs_.get("attribution") or {})}
+                    if eff:
+                        rec_ = dict(rec_, effectiveAttribution={k: v for k, v in eff.items() if v})
                 if rec_ is not None and rec_.get("prepared"):
                     # The real bytes travel with the record so an export can deliver the original itself.
                     rec_ = dict(rec_, prepared=engine.prepared_manifest(store, cid, rec_))

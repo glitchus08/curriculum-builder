@@ -3421,10 +3421,15 @@ class ProvenanceRecordsTheWholeInvocation(unittest.TestCase):
         rec = wait(cid)
         rs = rec["stages"]["research"]
         prov = rs["attributionHistory"][next(iter(rs["attributionHistory"]))][-1]["provenance"]
-        self.assertIsNone(prov["requestSnapshot"], "the stored copy is not this run's request")
-        self.assertIn("NOT this run's request", prov["requestSnapshotUnavailable"])
+        # Superseded: discarding this run's request was itself the defect. Both are now kept.
+        self.assertTrue(prov["requestSnapshot"], "this run's own request is kept, not dropped")
+        self.assertNotEqual(prov["requestSnapshot"], storage._fp_name(fp) + ".json",
+                            "under its own name, beside the one already there")
+        self.assertIn("Both are kept", prov["fingerprintSharedWithAnotherRequest"])
         self.assertEqual(json.loads(path.read_text())["prompt"], "a completely different request",
                          "and nothing was overwritten")
+        mine = json.loads((storage.course_dir("pipe", cid) / "requests" / prov["requestSnapshot"]).read_text())
+        self.assertEqual(len(mine["prompt"]), prov["promptCharacters"], "and it really is this run's request")
 
 
 class AnOlderConflictIsNotForgotten(unittest.TestCase):
@@ -3585,7 +3590,7 @@ class AnArchivedConflictIsStillAConflict(unittest.TestCase):
         rec = wait(cid)
         cur = rec["stages"]["research"]["attribution"][key]
         self.assertTrue(cur.get("historyIncomplete"), "Loom cannot claim there was no earlier disagreement")
-        self.assertIn("not a statement that there was none", cur["historyIncomplete"]["note"])
+        self.assertIn("NOT a statement that there was none", cur["historyIncomplete"]["note"])
 
     def test_a_resolution_still_applies_after_its_history_is_archived(self):
         f, cid, key = self._course("resolution-after-archive")
@@ -3610,3 +3615,227 @@ class AnArchivedConflictIsStillAConflict(unittest.TestCase):
         engine.runner("pipe", cid)._merge_research(r)
         att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
         self.assertEqual(att["detail"]["identity_correct"], "no", "a decision is not undone by archiving")
+
+
+class UnavailableHistoryIsNotNoHistory(unittest.TestCase):
+    """Expected archived judgements that cannot be read must not read as "there were none".
+
+    Missing file, truncated file and refused path all returned a confident `yes` with nothing to say about the
+    history Loom had failed to find, and the writer digest, the badge and the graph all repeated that
+    confidence.
+    """
+
+    def _ready(self, expected=3, write=None, link=False):
+        f, cid, rec = begin("history-manifest")
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        r = engine.runner("pipe", cid).load()
+        rs = r["stages"]["research"]
+        import hashlib as _h
+        name = "k" + _h.sha256(str(key).encode()).hexdigest()[:24] + ".jsonl"
+        rs["attributionHistoryArchived"] = {key: {"count": expected, "file": name}}
+        rs["attributionHistory"][key] = []
+        engine.runner("pipe", cid).save(r)
+        d = storage.course_dir("pipe", cid) / "attribution-history"
+        d.mkdir(exist_ok=True)
+        if link:
+            outside = storage.store_dir("pipe").parent / "outside-hist.jsonl"
+            outside.write_text('{"runId":"not ours"}\n', encoding="utf-8")
+            (d / name).symlink_to(outside)
+        elif write is not None:
+            (d / name).write_text(write, encoding="utf-8")
+        return f, cid, key
+
+    def _run(self, cid, key):
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        return rec["stages"]["research"]["attribution"][key]
+
+    def test_a_missing_archive_is_reported(self):
+        f, cid, key = self._ready(expected=3, write=None)
+        got = self._run(cid, key)["historyIncomplete"]
+        self.assertEqual((got["expectedArchived"], got["couldRead"]), (3, 0))
+
+    def test_a_truncated_archive_is_reported(self):
+        f, cid, key = self._ready(expected=3, write='{"runId":"one"}\n')
+        got = self._run(cid, key)["historyIncomplete"]
+        self.assertEqual((got["expectedArchived"], got["couldRead"]), (3, 1))
+        self.assertTrue(any("only 1 can be read" in w for w in got["why"]), got["why"])
+
+    def test_a_refused_archive_path_is_reported(self):
+        f, cid, key = self._ready(expected=3, link=True)
+        got = self._run(cid, key)["historyIncomplete"]
+        self.assertEqual((got["expectedArchived"], got["couldRead"]), (3, 0))
+
+    def test_a_complete_archive_raises_nothing(self):
+        import hashlib as _h
+        f, cid, key = self._ready(expected=2, write='{"runId":"a"}\n{"runId":"b"}\n')
+        self.assertIsNone(self._run(cid, key).get("historyIncomplete"))
+
+    def test_the_badge_the_writer_the_graph_and_the_export_all_stop_claiming_confidence(self):
+        from loom_server import evidence, lineage, prompts
+        f, cid, key = self._ready(expected=3, write=None)
+        self._run(cid, key)
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        s_ = r["stages"]["research"]["output"]["sources"][0]
+        self.assertTrue(s_["attribution"]["historyIncomplete"], "recomputed on read, not only when run")
+        self.assertEqual(s_["originalSource"]["status"], "not_verified", "the badge stops saying verified")
+        self.assertTrue(any("history is missing" in b for b in s_["originalSource"]["because"]))
+        row = prompts.sources_digest({"sources": [s_]})[0]
+        self.assertIn("part_of_this_sources_history_is_missing", row, "the writer is told")
+        self.assertIn("part_of_this_sources_history_is_missing", prompts.SOURCES_NOTE, "and told what it means")
+        w = next(iter(lineage.build([s_])["works"].values()))
+        self.assertNotEqual(w["originStatus"], "established", "the graph stops establishing the origin")
+
+    def test_the_flag_clears_once_the_history_can_be_read_again(self):
+        import hashlib as _h
+        f, cid, key = self._ready(expected=1, write=None)
+        self.assertTrue(self._run(cid, key).get("historyIncomplete"))
+        name = "k" + _h.sha256(str(key).encode()).hexdigest()[:24] + ".jsonl"
+        (storage.course_dir("pipe", cid) / "attribution-history" / name).write_text(
+            '{"runId":"recovered"}\n', encoding="utf-8")
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        self.assertIsNone(r["stages"]["research"]["output"]["sources"][0]["attribution"].get("historyIncomplete"))
+
+
+class AFailedRebuildPublishesNothing(unittest.TestCase):
+    """Merging in place and catching the exception saved whatever the failed merge had already mutated."""
+
+    def _ready(self, name):
+        f, cid, rec = begin(name)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no", role_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        wait(cid)
+        return f, cid, key
+
+    def _send(self, cid, key, dkey, chosen):
+        rec = engine.runner("pipe", cid).load()
+        rs = rec["stages"]["research"]
+        entry = rs["attribution"][key]
+        q = next(x for x in engine.open_questions(entry, (rs.get("attributionResolutions") or {}).get(key))
+                 if x["key"] == dkey)
+        return engine.record_resolution("pipe", cid, key, dkey, {
+            "by": "P", "chosen": chosen, "becauseWords": "w", "reason": "r",
+            "sawEvidence": entry["fingerprint"], "sawRevision": q["revision"],
+            "replacing": q.get("replacing")})
+
+    def test_a_merge_that_mutates_then_raises_changes_nothing(self):
+        f, cid, key = self._ready("rebuild-fails")
+        before = json.dumps(engine.runner("pipe", cid).load()["stages"]["research"]["output"], sort_keys=True)
+        real = engine.Runner._merge_research
+
+        def broken(self, rec):
+            rec["stages"]["research"]["output"]["sources"] = [{"id": "WRECKED"}]
+            raise RuntimeError("merge blew up half way")
+
+        engine.Runner._merge_research = broken
+        try:
+            got = self._send(cid, key, "identity", "no")
+        finally:
+            engine.Runner._merge_research = real
+        self.assertEqual(got["chosen"], "no", "the decision is the deliverable and it stands")
+        rec = engine.runner("pipe", cid).load()
+        self.assertEqual(json.dumps(rec["stages"]["research"]["output"], sort_keys=True), before,
+                         "and not one byte of the half-finished rebuild was published")
+        self.assertTrue(rec["derivedStateStale"], "the course says its views are out of date")
+        self.assertIn("nothing else was changed", rec["derivedStateStale"]["note"])
+
+    def test_the_stale_marker_clears_only_after_a_rebuild_that_finishes(self):
+        f, cid, key = self._ready("rebuild-recovers")
+        real = engine.Runner._merge_research
+
+        def broken(self, rec):
+            raise RuntimeError("nope")
+
+        engine.Runner._merge_research = broken
+        try:
+            self._send(cid, key, "identity", "no")
+        finally:
+            engine.Runner._merge_research = real
+        self.assertTrue(engine.runner("pipe", cid).load().get("derivedStateStale"))
+
+        self._send(cid, key, "role", "partly")
+        rec = engine.runner("pipe", cid).load()
+        self.assertIsNone(rec.get("derivedStateStale"), "a rebuild that finished clears it")
+        self.assertEqual(len(rec["stages"]["research"]["attributionDecisions"]), 2, "both decisions kept")
+        att = rec["stages"]["research"]["output"]["sources"][0]["attribution"]
+        self.assertEqual({d["about"] for d in att.get("decidedByAPerson") or []}, {"identity", "role"})
+
+
+class AReopenedDecisionCanBeReplaced(unittest.TestCase):
+    """The page read `x.replacing` and nothing ever put it there, so a reopened question had no honest action."""
+
+    def _ready(self):
+        f, cid, rec = begin("reopen")
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        wait(cid)
+        return f, cid, key
+
+    def _decide(self, cid, key, chosen, replacing=None):
+        rec = engine.runner("pipe", cid).load()
+        rs = rec["stages"]["research"]
+        entry = rs["attribution"][key]
+        q = next(x for x in engine.open_questions(entry, (rs.get("attributionResolutions") or {}).get(key))
+                 if x["key"] == "identity")
+        return engine.record_resolution("pipe", cid, key, "identity", {
+            "by": "P", "chosen": chosen, "becauseWords": "w", "reason": "r",
+            "sawEvidence": entry["fingerprint"], "sawRevision": q["revision"],
+            "replacing": replacing if replacing is not None else q.get("replacing")})
+
+    def test_a_reopened_question_carries_the_decision_it_would_replace(self):
+        f, cid, key = self._ready()
+        first = self._decide(cid, key, "yes")
+        # The review answers differently again on the same evidence: the question reopens.
+        r = engine.runner("pipe", cid).load()
+        rs = r["stages"]["research"]
+        rs["attribution"][key]["unresolvedDisagreements"] = [
+            {"aspect": "identity", "key": "identity", "earlier": "yes", "later": "partly",
+             "sameEvidence": True, "sameWholeRequest": True}]
+        engine.runner("pipe", cid).save(r)
+        rec = engine.runner("pipe", cid).load()
+        rs = rec["stages"]["research"]
+        q = engine.open_questions(rs["attribution"][key], rs["attributionResolutions"][key])[0]
+        self.assertEqual(q["replacing"], first["decisionId"], "the page is told which decision it supersedes")
+        self.assertEqual(q["previousDecision"]["chosen"], "yes", "and what that decision was")
+
+    def test_deciding_again_supersedes_and_keeps_both(self):
+        f, cid, key = self._ready()
+        first = self._decide(cid, key, "yes")
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["research"]["attribution"][key]["unresolvedDisagreements"] = [
+            {"aspect": "identity", "key": "identity", "earlier": "yes", "later": "partly",
+             "sameEvidence": True, "sameWholeRequest": True}]
+        engine.runner("pipe", cid).save(r)
+        second = self._decide(cid, key, "no")
+        self.assertEqual(second["replaces"], first["decisionId"])
+        hist = engine.decision_history(engine.runner("pipe", cid).load(), key, "identity")
+        self.assertEqual([h["chosen"] for h in hist], ["yes", "no"], "both kept, in order")
+
+    def test_the_decision_history_reaches_the_screen(self):
+        f, cid, key = self._ready()
+        self._decide(cid, key, "yes")
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["research"]["attribution"][key]["unresolvedDisagreements"] = [
+            {"aspect": "identity", "key": "identity", "earlier": "yes", "later": "partly"}]
+        engine.runner("pipe", cid).save(r)
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
+        self.assertTrue(att.get("decisionHistory"), "the panel can show every decision made")
+        self.assertEqual(att["decisionHistory"][0]["chosen"], "yes")
