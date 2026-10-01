@@ -315,7 +315,13 @@ def duplicate_course(store, cid: str, name: str | None = None) -> dict:
                 eng["status"] = "paused"
                 eng["pause"] = {"kind": "copied", "reason": "This course was copied while work was unfinished. Resume to finish it here.", "at": now_iso()}
             _place_prepared(store, meta["id"], prepared_bundle(store, cid), eng)
-            _place_provenance(store, meta["id"], provenance_bundle(store, cid))
+            # The copy's own shortfall was thrown away here, so a request that did not fit simply vanished and
+            # the copy looked like a complete record of everything ever asked.
+            carry = dict(provenance_bundle(store, cid))
+            if was := eng.get("provenanceIncomplete"):
+                carry["alreadyIncomplete"] = was
+            if gap := _place_provenance(store, meta["id"], carry):
+                eng["provenanceIncomplete"] = dict(gap, copiedAt=now_iso())
             write_atomic(course_dir(store, meta["id"]) / "engine.json", json.dumps(eng, indent=1, ensure_ascii=False))
         return meta
 
@@ -341,7 +347,10 @@ def backup(store, cid: str) -> dict:
         hist.reverse()
         return {"kind": "glitch-loom-backup", "formatVersion": 1, "madeAt": now_iso(), "course": {"id": cid, "meta": _meta(d), "raw": read_text(d / "course.json") or ""},
                 "engine": read_json(d / "engine.json"), "history": hist, "historyLeftOut": len(files) - len(hist), "previous": read_text(d / "previous.json"),
-                "prepared": prepared_bundle(store, cid), "provenance": provenance_bundle(store, cid),
+                "prepared": prepared_bundle(store, cid),
+                "provenance": dict(provenance_bundle(store, cid),
+                                   **({"alreadyIncomplete": (read_json(d / "engine.json") or {}).get("provenanceIncomplete")}
+                                      if (read_json(d / "engine.json") or {}).get("provenanceIncomplete") else {})),
                 "note": "A full copy of one Loom course for safekeeping. It contains internal notes. It is not an export for teaching and nothing in it is published."}
 
 
@@ -446,6 +455,23 @@ def write_engine(store, cid: str, rec: dict) -> None:
         write_atomic(engine_path(store, cid), json.dumps(rec, indent=1, ensure_ascii=False))
 
 
+def update_engine(store, cid: str, change):
+    """Read, change and write a course's record without letting anything in between.
+
+    Read-then-write with no lock around the pair is a race whenever two people act at once: both read the same
+    state, both decide they are allowed to write, and the second quietly replaces the first. `change` is called
+    with the record and returns what the caller wants back; raising from it leaves the record untouched.
+    """
+    with LOCK:
+        rec = read_json(engine_path(store, cid))
+        if not isinstance(rec, dict):
+            raise NotFound("That course has no saved work.")
+        out = change(rec)
+        rec["savedAt"] = now_iso()
+        write_atomic(engine_path(store, cid), json.dumps(rec, indent=1, ensure_ascii=False))
+        return out
+
+
 # Durable provenance beside a course. Two directories, both append-only.
 #
 # `requests/` holds one file per DISTINCT request the attribution reviewer was sent — the whole prompt, the answer
@@ -472,8 +498,9 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
     """
     name = _fp_name(fingerprint) + ".json"
     with LOCK:
-        d = course_dir(store, cid) / "requests"
-        d.mkdir(exist_ok=True)
+        d = provenance_dir(store, cid, "requests", make=True)
+        if d is None:
+            raise StoreError("This course's request store is not a directory Loom will write to.")
         path = d / name
         if not path.exists():
             write_atomic(path, json.dumps(payload, indent=1, ensure_ascii=False))
@@ -482,7 +509,8 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
 
 def read_request_snapshot(store, cid: str, fingerprint: str) -> dict | None:
     with LOCK:
-        return read_json(course_dir(store, cid) / "requests" / (_fp_name(fingerprint) + ".json"))
+        p = provenance_dir(store, cid, "requests")
+        return read_json(p / (_fp_name(fingerprint) + ".json")) if p else None
 
 
 def archive_judgements(store, cid: str, key: str, entries: list) -> str:
@@ -491,8 +519,9 @@ def archive_judgements(store, cid: str, key: str, entries: list) -> str:
         return ""
     name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
     with LOCK:
-        d = course_dir(store, cid) / "attribution-history"
-        d.mkdir(exist_ok=True)
+        d = provenance_dir(store, cid, "attribution-history", make=True)
+        if d is None:
+            raise StoreError("This course's judgement archive is not a directory Loom will write to.")
         with (d / name).open("a", encoding="utf-8") as fh:
             for e in entries:
                 fh.write(json.dumps({"key": key, **e}, ensure_ascii=False) + "\n")
@@ -501,8 +530,9 @@ def archive_judgements(store, cid: str, key: str, entries: list) -> str:
 
 def read_archived_judgements(store, cid: str, key: str) -> list:
     name = "k" + hashlib.sha256(str(key).encode("utf-8")).hexdigest()[:24] + ".jsonl"
-    path = course_dir(store, cid) / "attribution-history" / name
-    if not path.is_file():
+    p = provenance_dir(store, cid, "attribution-history")
+    path = (p / name) if p else None
+    if path is None or path.is_symlink() or not path.is_file():
         return []
     out = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -514,8 +544,44 @@ def read_archived_judgements(store, cid: str, key: str) -> list:
     return out
 
 
+PROVENANCE_FILES = 2000     # how many provenance files one restore will write into a course
 PROVENANCE_BYTES = 8 * 1024 * 1024  # how much request/judgement provenance one backup file will carry
 _PROV_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(json|jsonl)$")
+
+
+def _inside(course: Path, p: Path) -> bool:
+    """Whether a path really is this course's own, with no link anywhere on the way to it.
+
+    Checking the leaf alone was not enough: a symlinked DIRECTORY was still walked, so planting a link named
+    `requests` pulled a whole directory from outside the course into a backup. Every step from the course root
+    down has to be a real directory that is really here.
+    """
+    try:
+        rel = p.relative_to(course)
+    except ValueError:
+        return False
+    at = course
+    for part in rel.parts:
+        at = at / part
+        if at.is_symlink():
+            return False
+    try:
+        return p.resolve().is_relative_to(course.resolve())
+    except (OSError, ValueError):
+        return False
+
+
+def provenance_dir(store, cid: str, sub: str, make: bool = False) -> Path | None:
+    """One of a course's provenance directories, or None when what is there is not one."""
+    d = course_dir(store, cid)
+    p = d / sub
+    if make and not p.exists():
+        p.mkdir(exist_ok=True)
+    if not p.exists():
+        return None
+    if not _inside(d, p) or not p.is_dir():
+        return None
+    return p
 
 
 def provenance_bundle(store, cid: str) -> dict:
@@ -530,14 +596,16 @@ def provenance_bundle(store, cid: str) -> dict:
     got: dict = {"requests": [], "judgements": [], "leftOut": 0}
     used = 0
     for sub, into in (("requests", "requests"), ("attribution-history", "judgements")):
-        p = d / sub
-        if not p.is_dir():
+        p = provenance_dir(store, cid, sub)
+        if p is None:
+            if (d / sub).exists():
+                got.setdefault("skipped", []).append(sub + " (not a directory of this course, not read)")
             continue
         # `is_file()` follows a symlink, so a link planted in these directories pulled a file from outside the
         # course into the backup. A backup must contain the course and nothing else, so only real files that are
         # really here are read, and anything else is named rather than silently skipped.
-        for f in sorted([x for x in p.iterdir() if x.is_file() and not x.is_symlink()],
-                        key=lambda x: x.stat().st_mtime, reverse=True):
+        real = [x for x in p.iterdir() if not x.is_symlink() and x.is_file() and _inside(d, x)]
+        for f in sorted(real, key=lambda x: x.stat().st_mtime, reverse=True):
             if not _PROV_NAME.match(f.name):
                 got.setdefault("skipped", []).append(f.name)
                 continue
@@ -564,6 +632,15 @@ def _place_provenance(store, cid: str, bundle) -> dict | None:
         return None
     d = course_dir(store, cid)
     refused: list = []
+    written = 0
+    total = sum(len(str(it.get("raw") or "")) for k in ("requests", "judgements")
+                for it in (bundle.get(k) if isinstance(bundle.get(k), list) else []) if isinstance(it, dict))
+    if total > PROVENANCE_BYTES * 2:
+        return {"recordsNotInThisCopy": 0, "inheritedFromTheOriginal": None, "notCopiedFromTheOriginal": [],
+                "refusedOnRestore": [f"the whole provenance in that backup is {total} characters, more than Loom "
+                                     f"will write into one course"],
+                "whatThisMeans": "This course was restored without its request and judgement records, because the "
+                                 "backup carried more of them than Loom will write. The original still holds them."}
     for into, sub in (("requests", "requests"), ("judgements", "attribution-history")):
         items = bundle.get(into)
         if not isinstance(items, list):
@@ -575,18 +652,31 @@ def _place_provenance(store, cid: str, bundle) -> dict | None:
             if not isinstance(raw, str) or not _PROV_NAME.match(name):
                 refused.append(str(name)[:80])
                 continue
-            (d / sub).mkdir(exist_ok=True)
-            write_atomic(d / sub / name, raw)
+            if len(raw) > PROVENANCE_BYTES or written >= PROVENANCE_FILES:
+                # Checked BEFORE anything is written, so a backup cannot be used to fill a course's disk.
+                refused.append(f"{name} (too large or too many to restore)")
+                continue
+            target = provenance_dir(store, cid, sub, make=True)
+            if target is None:
+                refused.append(f"{name} (its directory in this course is not one Loom will write to)")
+                continue
+            write_atomic(target / name, raw)
+            written += 1
     left = bundle.get("leftOut")
     skipped = bundle.get("skipped") if isinstance(bundle.get("skipped"), list) else []
-    if not (isinstance(left, int) and left > 0) and not skipped and not refused:
+    carried = bundle.get("alreadyIncomplete")
+    if not (isinstance(left, int) and left > 0) and not skipped and not refused and not carried:
         return None
-    return {"recordsNotInThisCopy": left if isinstance(left, int) else 0,
+    return {"recordsNotInThisCopy": (left if isinstance(left, int) else 0)
+                                    + int((carried or {}).get("recordsNotInThisCopy") or 0),
+            # Incompleteness accumulates. A copy of a copy is not more complete than what it was copied from,
+            # and a backup taken from an incomplete course must not report a clean leftOut of zero.
+            "inheritedFromTheOriginal": carried or None,
             "notCopiedFromTheOriginal": [str(x)[:80] for x in skipped][:50],
             "refusedOnRestore": refused[:50],
-            "whatThisMeans": ("This course was restored from a backup that did not carry every request and "
-                              "judgement the original had. What is here is real; it is not the whole record. "
-                              "The original course still holds the rest.")}
+            "whatThisMeans": ("This course was made from a backup or a copy that did not carry every request "
+                              "and judgement the original had. What is here is real; it is not the whole "
+                              "record. The original course still holds the rest.")}
 
 
 EXPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(json|html)$")

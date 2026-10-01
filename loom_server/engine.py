@@ -560,6 +560,33 @@ def _execution_provenance() -> dict:
     return got
 
 
+_CLI_VERSION: dict = {}
+
+
+def cli_version() -> dict:
+    """Which build of the Claude tool is actually answering, read once and remembered.
+
+    "The same request under the same settings" is not the same request when a different build of the tool
+    answered it. The model name does not carry that: the tool around it changes independently.
+    """
+    path = cli_path()
+    if not path:
+        return {"found": False, "version": "", "path": ""}
+    if _CLI_VERSION.get("path") == path:
+        return _CLI_VERSION
+    got = {"found": True, "path": path, "version": ""}
+    try:
+        r = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=20,
+                           env=clean_env(), cwd=str(work_dir()))
+        got["version"] = (r.stdout or r.stderr or "").strip()[:120]
+    except Exception as e:
+        got["version"] = ""
+        got["couldNotRead"] = type(e).__name__
+    _CLI_VERSION.clear()
+    _CLI_VERSION.update(got)
+    return got
+
+
 def request_settings() -> dict:
     """The execution configuration a judgement was produced under.
 
@@ -568,8 +595,12 @@ def request_settings() -> dict:
     this was in the fingerprint, so runs made under different settings compared as identical requests.
     """
     cfg = config()
+    cli = cli_version()
     return {"model": cfg.get("model") or "the tool's own default", "effort": cfg.get("effort") or "",
-            "testDouble": bool(os.environ.get("LOOM_CLAUDE_BIN"))}
+            "testDouble": bool(os.environ.get("LOOM_CLAUDE_BIN")),
+            # How the tool was actually invoked, not merely which model was asked for.
+            "cliVersion": cli.get("version") or "not recorded",
+            "turns": TURNS.get("attribution_review"), "timeoutSeconds": TIMEOUT.get("attribution_review")}
 
 
 _DECIDABLE = ("yes", "partly", "no", "cannot_tell")
@@ -615,6 +646,10 @@ def apply_resolutions(entry: dict, resolutions) -> dict:
     for d in live:
         dkey = d.get("key") if isinstance(d, dict) else None
         r = valid_resolution(str(dkey), resolutions.get(dkey), out.get("fingerprint")) if dkey else None
+        # A decision also has to be about THIS version of the question. Where the review has since answered
+        # differently again, the two answers a person chose between are no longer the two on the table.
+        if r and str(r.get("questionRevision") or "") not in ("", disagreement_revision(out, d)):
+            r = None
         if not r:
             still.append(d)
             continue
@@ -657,42 +692,115 @@ def apply_resolutions(entry: dict, resolutions) -> dict:
     return out
 
 
+def disagreement_revision(entry: dict, d: dict) -> str:
+    """A name for one open question AS IT STANDS, so a decision can say which version of it was answered.
+
+    A decision is about what a person read on the screen. Without a name for that, a submission written against
+    one state of the evidence was accepted and stamped with whatever the evidence had since become — the record
+    then said the person had decided something they were never shown.
+    """
+    return content_print([entry.get("fingerprint"), d.get("key"), d.get("earlier"), d.get("later"),
+                          d.get("earlierRunId"), d.get("laterRunId")])
+
+
+def open_questions(entry: dict) -> list:
+    """The open disagreements on one judgement, each with the revision a decision must name."""
+    out = []
+    for d in entry.get("unresolvedDisagreements") or []:
+        if isinstance(d, dict) and d.get("key"):
+            out.append(dict(d, revision=disagreement_revision(entry, d)))
+    return out
+
+
 def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict) -> dict:
     """Write one person's decision about one disagreement. No model is asked anything.
 
     Deciding between two answers the review already gave is a judgement about a document a person has read. It
     needs no new review, and spending one would be a third answer rather than a decision about the first two.
     Nothing here touches an outline, an approval or any other stage: it writes one record and stops.
+
+    Reading, checking and writing all happen inside one hold on the course record. Doing them separately is a
+    race whenever two people act at once: both read the same state, both find themselves allowed to write, and
+    the second silently replaces the first.
     """
-    rec = storage.read_engine(store, cid)
-    if not isinstance(rec, dict):
-        raise storage.NotFound("That course has no saved work.")
-    rs = ((rec.get("stages") or {}).get("research") or {})
-    entry = (rs.get("attribution") or {}).get(claim_key)
-    if not isinstance(entry, dict):
-        raise storage.StoreError("Loom has no attribution judgement for that source.")
-    live = [d for d in entry.get("unresolvedDisagreements") or [] if isinstance(d, dict)]
-    if not any(d.get("key") == dkey for d in live):
-        raise storage.StoreError("There is no open disagreement about that to decide.")
+    if runner(store, cid).busy():
+        raise storage.Conflict("Loom is working on this course. Decisions are not recorded while a job is "
+                               "running, so they cannot be overwritten by what it saves.", None)
     want = {k: str(decision.get(k) or "").strip() for k in ("by", "chosen", "becauseWords", "reason")}
-    if not all(want.values()):
-        raise storage.StoreError("A decision needs who made it, which answer stands, the words in the document "
-                                 "that settle it, and why.")
-    now = dict(want, at=storage.now_iso(), evidenceFingerprint=entry.get("fingerprint"))
-    if not valid_resolution(dkey, now, entry.get("fingerprint")):
-        raise storage.StoreError(f"{want['chosen']!r} is not an answer Loom recognises for that question.")
-    held = (rs.get("attributionResolutions") or {}).get(claim_key, {}).get(dkey)
-    if isinstance(held, dict) and held.get("chosen"):
-        # Someone decided this already, perhaps in another window. Their decision is not overwritten by a
-        # request that was written without knowing about it; replacing it means saying which one you saw.
-        if str(decision.get("replacing") or "") != str(held.get("at") or ""):
-            raise storage.Conflict("Someone else has already decided this. Reload to see their decision.",
-                                   held.get("at"))
-        now["replaced"] = {"chosen": held.get("chosen"), "by": held.get("by"), "at": held.get("at")}
-    rs.setdefault("attributionResolutions", {}).setdefault(claim_key, {})[dkey] = now
-    rec.setdefault("stages", {}).setdefault("research", rs)
-    storage.write_engine(store, cid, rec)
-    return now
+    saw_evidence = str(decision.get("sawEvidence") or "").strip()
+    saw_revision = str(decision.get("sawRevision") or "").strip()
+
+    def change(rec):
+        # Checked inside the hold on the record, where the answer cannot go stale between asking and writing.
+        # `busy()` only knows about work started in this process; a record saved as running is the broader
+        # signal, and either means a job may be about to save over whatever is written here.
+        if rec.get("status") == "running":
+            raise storage.Conflict("Loom is working on this course. Decisions are not recorded while a job is "
+                                   "running, so they cannot be overwritten by what it saves.", None)
+        rs = ((rec.get("stages") or {}).get("research") or {})
+        entry = (rs.get("attribution") or {}).get(claim_key)
+        if not isinstance(entry, dict):
+            raise storage.StoreError("Loom has no attribution judgement for that source.")
+        d = next((x for x in open_questions(entry) if x["key"] == dkey), None)
+        if d is None:
+            raise storage.StoreError("There is no open disagreement about that to decide.")
+        if not all(want.values()):
+            raise storage.StoreError("A decision needs who made it, which answer stands, the words in the "
+                                     "document that settle it, and why.")
+        # What the person saw has to match what is here. Either is enough on its own to make the decision one
+        # about a different question, so neither may be left out and neither may be stale.
+        if not saw_evidence or not saw_revision:
+            raise storage.StoreError("The decision did not say which version of the evidence it was made on.")
+        if saw_evidence != str(entry.get("fingerprint") or "") or saw_revision != d["revision"]:
+            raise storage.Conflict("The evidence or the question changed after this was shown to you. Reload "
+                                   "and look again before deciding.", d["revision"])
+        now = dict(want, at=storage.now_iso(), evidenceFingerprint=entry.get("fingerprint"),
+                   questionRevision=d["revision"])
+        if not valid_resolution(dkey, now, entry.get("fingerprint")):
+            raise storage.StoreError(f"{want['chosen']!r} is not an answer Loom recognises for that question.")
+        held = (rs.get("attributionResolutions") or {}).get(claim_key, {}).get(dkey)
+        if isinstance(held, dict) and held.get("chosen"):
+            # Replacing someone's decision means naming the one you saw. Two timestamps can be identical to the
+            # second, so the id is what identifies a decision, never the time it was made.
+            if str(decision.get("replacing") or "") != str(held.get("decisionId") or ""):
+                raise storage.Conflict("Someone else has already decided this. Reload to see their decision.",
+                                       held.get("decisionId"))
+        # Every decision is kept in full, in the order it was made. Keeping only the newest and a shortened
+        # note of the one before it threw away the quotations and the reasons that justified the earlier ones,
+        # which is the whole record of how a contested claim came to stand where it does.
+        events = rs.setdefault("attributionDecisions", [])
+        now["decisionId"] = secrets.token_hex(8)
+        now["sequence"] = len(events) + 1
+        now["claimKey"], now["question"] = claim_key, dkey
+        if isinstance(held, dict) and held.get("decisionId"):
+            now["replaces"] = held["decisionId"]
+        events.append(dict(now))
+        rs.setdefault("attributionResolutions", {}).setdefault(claim_key, {})[dkey] = dict(now)
+        rec.setdefault("stages", {}).setdefault("research", rs)
+        return dict(now)
+
+    got = storage.update_engine(store, cid, change)
+    # The decision is written, but what the app SERVES is the saved record, and the saved record still carries
+    # the judgement as it stood before. Writing without this left a decision that was real in the file and
+    # invisible on the screen until something else happened to re-merge. The merge is done after the write, not
+    # inside it, so a failure here cannot lose a decision that is already safely recorded.
+    try:
+        rec = storage.read_engine(store, cid)
+        if isinstance(rec, dict) and ((rec.get("stages") or {}).get("research") or {}).get("batches"):
+            runner(store, cid)._merge_research(rec)
+            storage.write_engine(store, cid, rec)
+    except Exception:
+        pass
+    return got
+
+
+def decision_history(rec: dict, claim_key: str | None = None, dkey: str | None = None) -> list:
+    """Every decision ever recorded, oldest first. Nothing here is ever rewritten or removed."""
+    events = (((rec or {}).get("stages") or {}).get("research") or {}).get("attributionDecisions") or []
+    out = [e for e in events if isinstance(e, dict)
+           and (claim_key is None or e.get("claimKey") == claim_key)
+           and (dkey is None or e.get("question") == dkey)]
+    return sorted(out, key=lambda e: e.get("sequence") or 0)
 
 
 def attribution_material(s: dict, text: str | None = None) -> dict:
@@ -1321,7 +1429,13 @@ class Runner:
             # both a waste and a trap: the screen would keep showing a conflict that had already been settled.
             if av:
                 av = apply_resolutions(av, (st.get("attributionResolutions") or {}).get(ck))
+                # Each open question travels with the name of its current version, so whatever is shown can be
+                # answered against exactly that and nothing else.
+                if av.get("unresolvedDisagreements"):
+                    av = dict(av, unresolvedDisagreements=open_questions(av))
             merged["sources"][i]["attribution"] = av or None
+            # The claim key is what a decision is filed under, so the screen that offers the decision needs it.
+            merged["sources"][i]["claimKey"] = ck
             merged["sources"][i]["originalSource"] = evidence.original_status(merged["sources"][i], av.get("verdict") if av else None)
         # Works and how they descend are worked out from the finished source records, so re-running research or a
         # changed verdict is reflected rather than left behind in a saved sentence.
@@ -1784,6 +1898,12 @@ class Runner:
         snapshot = storage.save_request_snapshot(self.store, self.cid, request_print, dict(
             request, at=storage.now_iso(), stage="attribution_review", requestFingerprint=request_print,
             reviewerInputVersion=prompts.REVIEWER_INPUT_VERSION, sourcesInRequest=len(srcs), **execution))
+        # A fingerprint is a short hash, and a snapshot is written once and never replaced. If a DIFFERENT
+        # request ever lands on an existing name, the stored copy is not the one this run sent, and treating it
+        # as such would make a replay silently wrong. Say so rather than let the two be confused.
+        kept = storage.read_request_snapshot(self.store, self.cid, request_print)
+        collided = bool(kept) and (kept.get("prompt") != p or kept.get("system") != prompts.SYSTEM
+                                   or kept.get("schema") != schema or kept.get("settings") != settings)
         r = self.call(rec, "attribution_review", "attribution_review", "A separate check of who made each source and how they connect", p, schema)
         out = r["output"]
         ids = {s_["id"]: s_ for s_ in srcs}
@@ -1802,7 +1922,11 @@ class Runner:
         provenance = {"runId": run_id, "at": storage.now_iso(), "model": r["model"], "stage": "attribution_review",
                       "batchInputFingerprint": batch_print, "requestFingerprint": request_print,
                       "settingsFingerprint": content_print(settings), "settings": settings,
-                      "requestSnapshot": snapshot,
+                      "requestSnapshot": None if collided else snapshot,
+                      **({"requestSnapshotUnavailable": (
+                          "Another request is already stored under this fingerprint and its contents differ, so "
+                          "the stored copy is NOT this run's request. Nothing was overwritten; this run's "
+                          "request was not kept.")} if collided else {}),
                       "promptCharacters": len(p), "sourcesInRequest": len(srcs),
                       "reviewerInputVersion": prompts.REVIEWER_INPUT_VERSION, **execution}
 
@@ -1840,9 +1964,13 @@ class Runner:
                 # last two runs agree, so comparing only against the run before would show nothing wrong by the
                 # third — while the first two still contradict each other on the same evidence. Unresolved
                 # disagreements are therefore carried forward under their own key until a person settles them.
-                for d in prev.get("unresolvedDisagreements") or []:
-                    if isinstance(d, dict) and d.get("key"):
-                        live[d["key"]] = d
+                # Every earlier judgement on this same evidence is consulted, not only the one before. A
+                # conflict raised three runs ago and absent from the latest entry is still unsettled: reading
+                # only the previous entry let it drop out of sight the moment one run happened not to repeat it.
+                for older in same_input:
+                    for d in older.get("unresolvedDisagreements") or []:
+                        if isinstance(d, dict) and d.get("key"):
+                            live.setdefault(d["key"], d)
                 # Same evidence is not the same question. Only call it a disagreement about the model when the
                 # WHOLE request matched — same judge rules, same schema, same prompt — otherwise say plainly that
                 # the asking changed too, so the difference is never counted as evidence about the model alone.

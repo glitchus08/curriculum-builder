@@ -378,3 +378,101 @@ class BackupRefusesWhatIsNotTheCourse(unittest.TestCase):
         new = st.restore("sym", st.backup("sym", cid))["id"]
         self.assertIsNone((st.read_engine("sym", new) or {}).get("provenanceIncomplete"))
         self.assertEqual(st.read_request_snapshot("sym", new, "abc123")["prompt"], "real")
+
+
+class ProvenanceStaysInsideTheCourse(unittest.TestCase):
+    """Checking the leaf was not enough: a symlinked DIRECTORY was still walked."""
+
+    def _course(self, name):
+        cid = st.create_course("esc", STATE(name), name)["id"]
+        st.write_engine("esc", cid, {"status": "paused", "stages": {}})
+        return cid
+
+    def _outside(self, name):
+        d = st.store_dir("esc").parent / name
+        d.mkdir(exist_ok=True)
+        (d / "planted.json").write_text('{"not":"part of this course"}', encoding="utf-8")
+        return d
+
+    def test_a_symlinked_provenance_directory_is_not_followed(self):
+        cid = self._course("symdir")
+        (st.course_dir("esc", cid) / "requests").symlink_to(self._outside("outside-a"), target_is_directory=True)
+        b = st.backup("esc", cid)
+        self.assertEqual(b["provenance"]["requests"], [], "a link is not this course's directory")
+        self.assertNotIn("part of this course", json.dumps(b))
+        self.assertTrue(b["provenance"].get("skipped"), "and it is named rather than silently ignored")
+
+    def test_the_same_holds_for_the_judgement_archive(self):
+        cid = self._course("symarchive")
+        (st.course_dir("esc", cid) / "attribution-history").symlink_to(self._outside("outside-b"),
+                                                                      target_is_directory=True)
+        self.assertEqual(st.backup("esc", cid)["provenance"]["judgements"], [])
+        self.assertEqual(st.read_archived_judgements("esc", cid, "any-key"), [])
+
+    def test_writing_through_a_linked_directory_is_refused(self):
+        cid = self._course("symwrite")
+        (st.course_dir("esc", cid) / "requests").symlink_to(self._outside("outside-c"), target_is_directory=True)
+        with self.assertRaises(st.StoreError):
+            st.save_request_snapshot("esc", cid, "abc123", {"prompt": "must not land outside the course"})
+        self.assertFalse((st.store_dir("esc").parent / "outside-c" / "abc123.json").exists())
+
+    def test_a_copy_does_not_carry_anything_through_a_linked_directory(self):
+        cid = self._course("symcopy")
+        (st.course_dir("esc", cid) / "requests").symlink_to(self._outside("outside-d"), target_is_directory=True)
+        new = st.duplicate_course("esc", cid)["id"]
+        self.assertIsNone(st.read_request_snapshot("esc", new, "planted"))
+
+    def test_a_restore_will_not_write_more_than_it_should(self):
+        cid = self._course("toobig")
+        b = st.backup("esc", cid)
+        huge = "z" * (st.PROVENANCE_BYTES + 1000)
+        b["provenance"] = {"requests": [{"file": "big.json", "raw": huge}], "judgements": [], "leftOut": 0}
+        new = st.restore("esc", b)["id"]
+        self.assertIsNone(st.read_request_snapshot("esc", new, "big"), "an oversized record is not written")
+        gap = (st.read_engine("esc", new) or {}).get("provenanceIncomplete")
+        self.assertTrue(gap and gap["refusedOnRestore"], "and the course says what it refused")
+
+
+class IncompletenessAccumulates(unittest.TestCase):
+    """A copy of a copy is not more complete than what it was copied from."""
+
+    def _full_course(self, name):
+        cid = st.create_course("inc", STATE(name), name)["id"]
+        st.write_engine("inc", cid, {"status": "paused", "stages": {}})
+        big = "z" * (st.PROVENANCE_BYTES // 2 + 10_000)
+        for k in ("aaa", "bbb", "ccc"):
+            st.save_request_snapshot("inc", cid, k, {"prompt": big})
+        return cid
+
+    def test_a_copy_that_could_not_carry_everything_says_so(self):
+        cid = self._full_course("capped")
+        before = len(list((st.course_dir("inc", cid) / "requests").iterdir()))
+        new = st.duplicate_course("inc", cid)["id"]
+        after = len(list((st.course_dir("inc", new) / "requests").iterdir()))
+        self.assertLess(after, before, "the fixture really does cap out")
+        gap = (st.read_engine("inc", new) or {}).get("provenanceIncomplete")
+        self.assertIsNotNone(gap, "a request vanished and the copy must not look complete")
+        self.assertGreater(gap["recordsNotInThisCopy"], 0)
+
+    def test_a_backup_of_an_incomplete_copy_does_not_report_itself_as_complete(self):
+        cid = self._full_course("cap2")
+        new = st.duplicate_course("inc", cid)["id"]
+        b = st.backup("inc", new)
+        self.assertTrue(b["provenance"].get("alreadyIncomplete"),
+                        "a clean leftOut of zero would claim a completeness this course does not have")
+
+    def test_incompleteness_carries_through_a_further_restore(self):
+        cid = self._full_course("cap3")
+        copy = st.duplicate_course("inc", cid)["id"]
+        again = st.restore("inc", st.backup("inc", copy))["id"]
+        gap = (st.read_engine("inc", again) or {}).get("provenanceIncomplete")
+        self.assertIsNotNone(gap, "the shortfall is inherited, not reset by another hop")
+        self.assertTrue(gap.get("inheritedFromTheOriginal") or gap["recordsNotInThisCopy"] > 0)
+
+    def test_a_complete_course_still_reports_itself_complete(self):
+        cid = st.create_course("inc", STATE("clean"), "clean")["id"]
+        st.write_engine("inc", cid, {"status": "paused", "stages": {}})
+        st.save_request_snapshot("inc", cid, "aaa", {"prompt": "small"})
+        new = st.duplicate_course("inc", cid)["id"]
+        self.assertIsNone((st.read_engine("inc", new) or {}).get("provenanceIncomplete"))
+        self.assertIsNone(st.backup("inc", new)["provenance"].get("alreadyIncomplete"))

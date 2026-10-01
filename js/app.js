@@ -952,7 +952,11 @@ document.addEventListener('click', async e => {
   if (!because.trim() || !why.trim()) { say('Say which words in the document settle it, and why.'); return; }
   box.querySelectorAll('[data-chosen]').forEach(x => { x.disabled = true; });
   try {
+    // What was on the screen travels with the answer. Without it the server stamps the decision with whatever
+    // the evidence has since become, and the record claims the person decided something they never saw.
     await api.decideAttribution(course.id, { claimKey: box.dataset.claim, disagreement: box.dataset.key,
+      sawEvidence: box.dataset.evidence, sawRevision: box.dataset.revision,
+      replacing: box.dataset.replacing || undefined,
       chosen: b.dataset.chosen, becauseWords: because, reason: why, by: 'the person at this computer' });
     say('Decision recorded. Nothing was asked of Claude.');
     await pollEngine();

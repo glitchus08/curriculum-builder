@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import * as J from '../js/journey.js';
 import * as F from '../js/flow.js';
 import * as R from '../js/real.js';
+import * as V2 from '../js/v2.js';
 import * as Store from '../js/store.js';
 
 const brief = o => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v && typeof v === 'object' && !Array.isArray(v) ? v : { value: v }]));
@@ -474,4 +475,42 @@ test('a review of freshly generated material reads as current once the page has 
   // One edit by the team, and the same review no longer matches.
   const e = JSON.parse(JSON.stringify(j)); e.sessions[1].activities[1].instructions[0] = 'Do it differently.';
   assert.notEqual(R.reviewPrint(e), J.contentPrint(serverInput));
+});
+
+// The decision panel is markup the server now validates strictly: it must carry the evidence and the question
+// revision it was drawn from, or every decision made from it is refused.
+test('the decision panel carries what the server requires, and offers no as an answer', () => {
+  const h = Object.assign(s => String(s), { esc: s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])), more: (a, b) => b });
+  const s = { id: 'S1', claimKey: 'https://e.org/later|c1', url: 'https://e.org/later', authors: ['Bo Okafor'],
+    evidenceLevel: 'direct_text_quote_found', directRetrieval: { sha256: 'a'.repeat(64) }, lineage: [],
+    originalSource: { status: 'not_verified', because: ['two runs disagree'] },
+    attribution: { verdict: 'yes', fingerprint: 'e3uhwg.yy',
+      unresolvedDisagreements: [{ aspect: 'identity', key: 'identity', earlier: 'no', later: 'yes', revision: '1hrx86a.19' }] } };
+  const html = V2.evidenceBlock(s, h);
+  assert.match(html, /data-claim="https:\/\/e\.org\/later\|c1"/);
+  assert.match(html, /data-key="identity"/);
+  assert.match(html, /data-revision="1hrx86a\.19"/, 'without the revision every decision is refused as stale');
+  assert.match(html, /data-evidence="e3uhwg\.yy"/, 'without the evidence stamp the server cannot bind the decision');
+  for (const a of ['yes', 'partly', 'no', 'cannot_tell']) assert.match(html, new RegExp(`data-chosen="${a}"`), a);
+  assert.match(html, /class="because"/); assert.match(html, /class="why"/);
+  assert.match(html, /Waiting on a person/);
+});
+
+test('a source with nothing contested shows no decision panel', () => {
+  const h = Object.assign(s => String(s), { esc: s => String(s == null ? '' : s), more: (a, b) => b });
+  const s = { id: 'S1', claimKey: 'k', url: 'https://e.org/a', evidenceLevel: 'direct_text', lineage: [],
+    originalSource: { status: 'verified', because: [] }, attribution: { verdict: 'yes' } };
+  assert.doesNotMatch(V2.evidenceBlock(s, h), /class="decide"/);
+});
+
+test('a decision already made is shown with what Claude had said', () => {
+  const h = Object.assign(s => String(s), { esc: s => String(s == null ? '' : s), more: (a, b) => b });
+  const s = { id: 'S1', claimKey: 'k', url: 'https://e.org/a', evidenceLevel: 'direct_text', lineage: [],
+    originalSource: { status: 'not_verified', because: [] },
+    attribution: { verdict: 'no', decidedByAPerson: [{ about: 'identity', chosen: 'no', by: 'A Person',
+      at: '2026-10-01T00:00:00Z', reason: 'read the erratum', theModelHadSaid: { later: 'yes' } }] } };
+  const html = V2.evidenceBlock(s, h);
+  assert.match(html, /Decided by a person/);
+  assert.match(html, /A Person/); assert.match(html, /read the erratum/);
+  assert.match(html, /Claude had said yes/, 'the model’s answer is not hidden by the decision');
 });
