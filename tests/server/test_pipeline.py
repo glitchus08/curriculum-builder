@@ -2968,3 +2968,41 @@ class OneSpellingOfTheAddress(unittest.TestCase):
         self.assertEqual(prompts.attribution_reviewer_input(a)["url"], prompts.attribution_reviewer_input(b)["url"])
         self.assertEqual(content_print(attribution_material(a)), content_print(attribution_material(b)),
                          "one record, one request: not the same record asked two different ways")
+
+
+
+class TheWriterIsToldWhatIsContested(unittest.TestCase):
+    """A writer shown only the aggregate verdict cannot tell a settled claim from a contested one.
+
+    `attribution_review_verdict` reads "yes" for a source whose identity two runs answered differently, so a
+    lesson could present a contested point as established fact and nobody reading the lesson would know.
+    """
+
+    def _row(self, attribution):
+        from loom_server import prompts
+        s_ = {"id": "S1", "title": "A later work", "url": "https://e.org/b", "claim": "c", "finding": "f",
+              "quote": "we repeated the earlier study", "strength": "direct", "role": "primary_extension",
+              "authors": ["Bo Okafor"], "published": "2005", "attribution": attribution, "node_ids": ["N1"],
+              "lineage": [{"relation": "replicated", "earlier_work": "A first report",
+                           "supporting_words": "we repeated the earlier study", "what_changed": "repeated it"}]}
+        return prompts.sources_digest({"sources": [s_]})[0]
+
+    def test_a_contested_source_is_flagged_beside_its_verdict(self):
+        row = self._row({"verdict": "yes", "unresolvedDisagreements": [
+            {"aspect": "identity", "key": "identity", "earlier": "no", "later": "yes"}]})
+        self.assertEqual(row["attribution_review_verdict"], "yes", "the aggregate verdict on its own looks settled")
+        got = row.get("the_attribution_review_disagrees_with_itself")
+        self.assertTrue(got, "and that is exactly why the contradiction has to travel with it")
+        self.assertEqual(got[0]["about"], "identity")
+        self.assertEqual((got[0]["earlier_answer"], got[0]["later_answer"]), ("no", "yes"))
+
+    def test_a_settled_source_carries_no_such_flag(self):
+        row = self._row({"verdict": "yes"})
+        self.assertNotIn("the_attribution_review_disagrees_with_itself", row)
+
+    def test_the_writer_rules_say_a_contested_claim_is_not_a_weaker_yes(self):
+        from loom_server import prompts
+        rules = prompts.SOURCES_NOTE
+        self.assertIn("the_attribution_review_disagrees_with_itself", rules)
+        self.assertIn("It is NOT a weaker yes and it is NOT a no", rules)
+        self.assertIn("do not pick the answer that suits the lesson", rules)

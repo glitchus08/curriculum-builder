@@ -315,6 +315,7 @@ def duplicate_course(store, cid: str, name: str | None = None) -> dict:
                 eng["status"] = "paused"
                 eng["pause"] = {"kind": "copied", "reason": "This course was copied while work was unfinished. Resume to finish it here.", "at": now_iso()}
             _place_prepared(store, meta["id"], prepared_bundle(store, cid), eng)
+            _place_provenance(store, meta["id"], provenance_bundle(store, cid))
             write_atomic(course_dir(store, meta["id"]) / "engine.json", json.dumps(eng, indent=1, ensure_ascii=False))
         return meta
 
@@ -340,7 +341,7 @@ def backup(store, cid: str) -> dict:
         hist.reverse()
         return {"kind": "glitch-loom-backup", "formatVersion": 1, "madeAt": now_iso(), "course": {"id": cid, "meta": _meta(d), "raw": read_text(d / "course.json") or ""},
                 "engine": read_json(d / "engine.json"), "history": hist, "historyLeftOut": len(files) - len(hist), "previous": read_text(d / "previous.json"),
-                "prepared": prepared_bundle(store, cid),
+                "prepared": prepared_bundle(store, cid), "provenance": provenance_bundle(store, cid),
                 "note": "A full copy of one Loom course for safekeeping. It contains internal notes. It is not an export for teaching and nothing in it is published."}
 
 
@@ -373,6 +374,7 @@ def restore(store, bundle: dict) -> dict:
                 eng["pause"] = {"kind": "restored", "reason": "This course was restored from a backup while work was unfinished.", "at": now_iso()}
             _place_prepared(store, meta["id"], bundle.get("prepared"), eng)
             write_atomic(d / "engine.json", json.dumps(eng, indent=1))
+        _place_provenance(store, meta["id"], bundle.get("provenance"))
         for h in kept:
             write_atomic(d / "history" / h["file"], h["raw"])
         if isinstance(bundle.get("previous"), str) and bundle["previous"]:
@@ -507,6 +509,54 @@ def read_archived_judgements(store, cid: str, key: str) -> list:
             except ValueError:
                 out.append({"unreadable": line[:200]})
     return out
+
+
+PROVENANCE_BYTES = 8 * 1024 * 1024  # how much request/judgement provenance one backup file will carry
+_PROV_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,120}\.(json|jsonl)$")
+
+
+def provenance_bundle(store, cid: str) -> dict:
+    """The kept requests and the archived judgements, for a backup or a copy.
+
+    These are the records that say what was asked and what was answered before. A backup that leaves them behind
+    restores a course whose history begins at the restore, which breaks "nothing is deleted" by a second route:
+    not by trimming the list, but by copying everything except the list. Where the cap bites, the most recently
+    written provenance is kept and the count of what was left out is carried in the backup rather than implied.
+    """
+    d = course_dir(store, cid)
+    got: dict = {"requests": [], "judgements": [], "leftOut": 0}
+    used = 0
+    for sub, into in (("requests", "requests"), ("attribution-history", "judgements")):
+        p = d / sub
+        if not p.is_dir():
+            continue
+        for f in sorted([x for x in p.iterdir() if x.is_file()], key=lambda x: x.stat().st_mtime, reverse=True):
+            size = f.stat().st_size
+            if used + size > PROVENANCE_BYTES:
+                got["leftOut"] += 1
+                continue
+            got[into].append({"file": f.name, "raw": f.read_text(encoding="utf-8")})
+            used += size
+    return got
+
+
+def _place_provenance(store, cid: str, bundle) -> None:
+    """Write kept requests and archived judgements into a course. Names are checked, so nothing escapes the course."""
+    if not isinstance(bundle, dict):
+        return
+    d = course_dir(store, cid)
+    for into, sub in (("requests", "requests"), ("judgements", "attribution-history")):
+        items = bundle.get(into)
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name, raw = str(it.get("file") or ""), it.get("raw")
+            if not isinstance(raw, str) or not _PROV_NAME.match(name):
+                continue
+            (d / sub).mkdir(exist_ok=True)
+            write_atomic(d / sub / name, raw)
 
 
 EXPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(json|html)$")

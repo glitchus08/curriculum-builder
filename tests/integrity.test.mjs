@@ -306,3 +306,56 @@ test('3: opening saved work does not change it', async () => {
   const old = JSON.parse(JSON.stringify(s)); delete old.journey.rev; delete old.revSeq;
   assert.ok(migrate(old).journey.rev >= 1, 'a draft saved without a number still gets one');
 });
+
+// A contested claim must not read as a settled one anywhere a person looks: not in the JSON a team keeps, and
+// not in the teacher pack. Two runs of the attribution review answering the same question differently on the
+// same evidence is a fact about the evidence, and leaving it out of the export hides exactly the thing a
+// reader would want before relying on the claim.
+const contested = (j) => {
+  j.origin = 'claude'; j.pipeline = 2;
+  j.research = {
+    lineage: {
+      works: {
+        'w:a': { id: 'w:a', title: 'A first report', creators: ['Ada Ito'], published: '1998', role: 'original_contribution', originStatus: 'established', seenAt: ['https://e.org/a'] },
+        'w:b': { id: 'w:b', title: 'A later work', creators: ['Bo Okafor'], published: '2005', role: 'primary_extension', originStatus: 'unknown', originWhy: ['x'], seenAt: ['https://e.org/b'] },
+      },
+      edges: [{ from: 'w:b', to: 'w:a', earlierWorkAsNamed: 'A first report', relation: 'replicated', whatChanged: 'repeated it', supportingWords: 'we repeated the earlier study', status: 'unresolved', why: ['two runs of the attribution review disagree about this relationship'], unresolvedDisagreements: [{ aspect: 'relationship', key: 'relationship|a first report|replicated', earlier: 'no', later: 'yes', sameEvidence: true, sameWholeRequest: true }] }],
+      summary: { works: 2, originalsEstablished: 1, descentEdges: 1, supportedEdges: 0, unresolvedEdges: 1, unknownEdges: 0, disputedEdges: 0 },
+    },
+    lineageChains: [{ original: { work: 'w:a', title: 'A first report' }, supportedExtensions: [], awaitingAPersonsDecision: [{ work: 'w:b', title: 'A later work', relation: 'replicated', status: 'unresolved' }], claimedButNotEstablished: [{ work: 'w:b', title: 'A later work', relation: 'replicated', status: 'unresolved' }] }],
+  };
+  j.sources = [{ id: 'S1', title: 'A later work', url: 'https://e.org/b', claim: 'c', finding: 'f', quote: 'we repeated the earlier study', role: 'primary_extension', authors: ['Bo Okafor'], published: '2005', attribution: { verdict: 'yes', unresolvedDisagreements: [{ aspect: 'identity', key: 'identity', earlier: 'no', later: 'yes', sameEvidence: true, sameWholeRequest: true }] } }];
+  return j;
+};
+
+test('1: a claim the review contradicts itself about is not exported as supported', () => {
+  const j = contested(J.makeJourney(brief({ ...base, format: 'workshop', time: 'half' })));
+  const pkg = J.buildPackage({ ver: 1, at: '2026-09-27T00:00:00Z', journey: j });
+  const L = pkg.evidence.worksAndHowTheyDescend;
+  assert.equal(L.descent[0].standing, 'unresolved', 'the standing travels into the export');
+  assert.equal(L.counts.supportedEdges, 0);
+  assert.equal(L.counts.unresolvedEdges, 1);
+  assert.deepEqual(L.originalsAndTheirExtensions[0].supportedExtensions, [], 'and it is not a supported extension');
+  assert.equal(L.originalsAndTheirExtensions[0].awaitingAPersonsDecision.length, 1);
+  assert.ok(L.readThisFirst.includes('until a person decides'), 'the reader is told what the standing means');
+});
+
+test('1: the JSON export says the attribution review contradicted itself about a source', () => {
+  const j = contested(J.makeJourney(brief({ ...base, format: 'workshop', time: 'half' })));
+  const pkg = J.buildPackage({ ver: 1, at: '2026-09-27T00:00:00Z', journey: j });
+  const s = pkg.evidence.sources.find(x => x.id === 'S1');
+  assert.ok(s.attributionReviewDisagreesWithItself, 'a verdict of yes alone would read as settled');
+  assert.equal(s.attributionReviewDisagreesWithItself[0].about, 'identity');
+  assert.equal(s.attributionReviewDisagreesWithItself[0].earlierAnswer, 'no');
+  assert.equal(s.nothingRestingOnThisIsSettled, true);
+});
+
+test('1: the teacher pack puts what is waiting on a person in front of the teacher', () => {
+  const j = contested(J.makeJourney(brief({ ...base, format: 'workshop', time: 'half' })));
+  const pkg = J.buildPackage({ ver: 1, at: '2026-09-27T00:00:00Z', journey: j });
+  const html = J.packHTML(pkg, 'teacher');
+  assert.ok(html.includes('Waiting on a person'), 'a teacher should not have to read a table to find it');
+  assert.ok(html.includes('unresolved'), 'and the standing is shown in the relationships table too');
+  const learner = J.packHTML(pkg, 'learner');
+  assert.ok(!learner.includes('Waiting on a person'), 'the learner pack still carries no internal review detail');
+});

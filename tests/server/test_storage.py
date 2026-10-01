@@ -286,3 +286,57 @@ class KeptExports(unittest.TestCase):
         self.assertEqual(st.list_exports("ex2", d["id"]), [])
         with self.assertRaises(st.NotFound):
             st.save_export("ex2", "cnotacourse1", "ok.json", "x", 1, "x")
+
+
+
+class ProvenanceSurvivesBackupCopyAndRestore(unittest.TestCase):
+    """A backup that leaves the provenance behind breaks "nothing is deleted" by a second route.
+
+    Not by trimming the list, but by copying everything except the list: the restored course would begin its
+    history at the restore, with no record of what was asked before or what was answered.
+    """
+
+    def _course(self, name):
+        cid = st.create_course("prov", STATE(name), name)["id"]
+        st.write_engine("prov", cid, {"status": "paused", "stages": {}})
+        st.save_request_snapshot("prov", cid, "abc123", {"prompt": "the whole ask", "schema": {"a": 1}})
+        st.archive_judgements("prov", cid, "claim-key-one", [{"runId": "r1", "verdict": "yes"}])
+        st.archive_judgements("prov", cid, "claim-key-one", [{"runId": "r2", "verdict": "no"}])
+        return cid
+
+    def test_a_backup_carries_the_kept_requests_and_the_archived_judgements(self):
+        b = st.backup("prov", self._course("backup-carries"))
+        self.assertIn("provenance", b, "a backup without the provenance restores a course with no past")
+        self.assertEqual(len(b["provenance"]["requests"]), 1)
+        self.assertEqual(len(b["provenance"]["judgements"]), 1, "one file per source key, holding both runs")
+        self.assertIn("the whole ask", b["provenance"]["requests"][0]["raw"])
+
+    def test_restoring_that_backup_brings_them_back_readable(self):
+        new = st.restore("prov", st.backup("prov", self._course("restore-brings-back")))["id"]
+        self.assertEqual(st.read_request_snapshot("prov", new, "abc123")["prompt"], "the whole ask")
+        got = [e.get("runId") for e in st.read_archived_judgements("prov", new, "claim-key-one")]
+        self.assertEqual(got, ["r1", "r2"], "every archived judgement came back, in order")
+
+    def test_copying_a_course_carries_them_too(self):
+        new = st.duplicate_course("prov", self._course("copy-carries"))["id"]
+        self.assertIsNotNone(st.read_request_snapshot("prov", new, "abc123"))
+        self.assertEqual(len(st.read_archived_judgements("prov", new, "claim-key-one")), 2)
+
+    def test_the_original_is_untouched_by_either(self):
+        cid = self._course("original-untouched")
+        st.restore("prov", st.backup("prov", cid))
+        st.duplicate_course("prov", cid)
+        self.assertEqual(len(st.read_archived_judgements("prov", cid, "claim-key-one")), 2)
+
+    def test_a_restore_cannot_be_made_to_write_outside_the_course(self):
+        b = st.backup("prov", self._course("no-escape"))
+        b["provenance"] = {"requests": [{"file": "../../escaped.json", "raw": "{}"},
+                                        {"file": "ok.json", "raw": '{"prompt": "kept"}'}], "judgements": []}
+        new = st.restore("prov", b)["id"]
+        self.assertFalse((st.store_dir("prov") / "escaped.json").exists(), "a name is checked before it is written")
+        self.assertTrue((st.course_dir("prov", new) / "requests" / "ok.json").exists())
+
+    def test_a_kept_request_is_written_once_and_not_replaced(self):
+        cid = self._course("immutable")
+        st.save_request_snapshot("prov", cid, "abc123", {"prompt": "something else entirely"})
+        self.assertEqual(st.read_request_snapshot("prov", cid, "abc123")["prompt"], "the whole ask")
