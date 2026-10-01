@@ -32,6 +32,9 @@ EDGE_STATUS = ("supported", "unresolved", "unknown", "disputed")
 # An unresolved disagreement sits just above disputed: it outranks both `unknown` and `supported`, so one record
 # of an assertion carrying a live contradiction cannot be covered up by another record that happens to look clean.
 _RANK = {"disputed": 0, "unresolved": 1, "unknown": 2, "supported": 3}
+# Findings, not absences. Neither can be displaced by a better-looking reading of the same assertion: a rejection
+# stands, and so does a contradiction nobody has settled.
+_STICKY = ("disputed", "unresolved")
 
 # Aspects of a judgement that belong to the SOURCE, so a contradiction in any of them unsettles every relationship
 # read from that source. A contradiction about one relationship is NOT one of these: it unsettles that
@@ -348,8 +351,11 @@ def edges_from_sources(sources: list, works: dict, texts: dict | None = None, ca
             for w in edge.get("why") or []:
                 if w not in (prior.get("why") or []) and w not in (prior.get("alsoSaid") or []):
                     prior.setdefault("alsoSaid", []).append(w)
+            # A contested reading is as sticky as a disputed one. Only `disputed` was protected here, so a
+            # record carrying a live contradiction was overwritten by a clean record of the same assertion
+            # whenever the clean one happened to be read first, and the standing depended on arrival order.
             if _RANK.get(edge["status"], 2) < _RANK.get(prior["status"], 2) or \
-                    (prior["status"] != "disputed" and _RANK.get(edge["status"], 2) > _RANK.get(prior["status"], 2)):
+                    (prior["status"] not in _STICKY and _RANK.get(edge["status"], 2) > _RANK.get(prior["status"], 2)):
                 prior.update({k: edge[k] for k in ("status", "why", "fromSource", "whatChanged", "limits")})
                 # The reasons travel with the status they explain. Adopting `unresolved` without the record of
                 # what was contradicted, or dropping that record when a reading moves off `unresolved`, would
@@ -457,8 +463,12 @@ def judge_edge(edge: dict, s: dict, works: dict, text: str | None = None) -> dic
         why.append("no words from the page were given to show it")
     elif against and " ".join(words.lower().split()) not in " ".join(str(against).lower().split()):
         why.append("the words given to show it are not in the text Loom retrieved")
-    av = (s.get("attribution") or {}).get("verdict")
-    detail = (s.get("attribution") or {}).get("detail") or {}
+    # An attribution record of the wrong shape used to raise here and take the whole graph down with it. A
+    # damaged record tells us nothing, which is not the same as telling us everything is fine: it fails closed.
+    att = _attribution_of(s)
+    av = att.get("verdict")
+    raw_detail = att.get("detail")
+    detail = raw_detail if isinstance(raw_detail, dict) else {}
     # The reviewer judges each claimed relationship on its own evidence. Use THAT judgement for this edge where it
     # exists: a page carrying one weak claim used to drag down every other claim on it, so a relationship whose
     # words were shown verbatim still counted as unsupported. Identity and role are still judged per source, because
@@ -512,7 +522,10 @@ def judge_edge(edge: dict, s: dict, works: dict, text: str | None = None) -> dic
 def _relationship_entry(detail: dict, edge: dict) -> dict | None:
     """The reviewer's judgement of THIS relationship, matched on the earlier work it names and the relation."""
     named, rel = _norm(edge.get("earlierWorkAsNamed")), _norm(edge.get("relation"))
-    for r in (detail or {}).get("relationships") or []:
+    rels = (detail or {}).get("relationships")
+    if not isinstance(rels, list):
+        return None
+    for r in rels:
         if not isinstance(r, dict):
             continue
         if _norm(r.get("relation")) == rel and (

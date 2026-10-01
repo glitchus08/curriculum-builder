@@ -340,3 +340,41 @@ class ProvenanceSurvivesBackupCopyAndRestore(unittest.TestCase):
         cid = self._course("immutable")
         st.save_request_snapshot("prov", cid, "abc123", {"prompt": "something else entirely"})
         self.assertEqual(st.read_request_snapshot("prov", cid, "abc123")["prompt"], "the whole ask")
+
+
+class BackupRefusesWhatIsNotTheCourse(unittest.TestCase):
+    """A backup must contain the course and nothing else, and must say what it could not carry."""
+
+    def _course(self, name):
+        cid = st.create_course("sym", STATE(name), name)["id"]
+        st.write_engine("sym", cid, {"status": "paused", "stages": {}})
+        st.save_request_snapshot("sym", cid, "abc123", {"prompt": "real"})
+        return cid
+
+    def test_a_link_pointing_out_of_the_course_is_not_read_into_the_backup(self):
+        cid = self._course("symlink")
+        outside = st.store_dir("sym").parent / "OUTSIDE-SECRET.json"
+        outside.write_text('{"not":"part of this course"}', encoding="utf-8")
+        (st.course_dir("sym", cid) / "requests" / "linked.json").symlink_to(outside)
+        b = st.backup("sym", cid)
+        names = [r["file"] for r in b["provenance"]["requests"]]
+        self.assertEqual(names, ["abc123.json"], "a symlink follows out of the course and must not be read")
+        self.assertNotIn("not part of this course", json.dumps(b))
+        self.assertTrue(any("linked.json" in x for x in b["provenance"].get("skipped") or []),
+                        "and it is named rather than silently dropped")
+
+    def test_a_restore_that_could_not_carry_everything_says_so_in_the_course(self):
+        cid = self._course("omitted")
+        b = st.backup("sym", cid)
+        b["provenance"] = dict(b["provenance"], leftOut=7, requests=[], judgements=[])
+        new = st.restore("sym", b)["id"]
+        gap = (st.read_engine("sym", new) or {}).get("provenanceIncomplete")
+        self.assertIsNotNone(gap, "a restored course cannot look like a complete record when it is not")
+        self.assertEqual(gap["recordsNotInThisCopy"], 7)
+        self.assertIn("not the whole record", gap["whatThisMeans"])
+
+    def test_a_complete_restore_carries_no_false_warning(self):
+        cid = self._course("complete")
+        new = st.restore("sym", st.backup("sym", cid))["id"]
+        self.assertIsNone((st.read_engine("sym", new) or {}).get("provenanceIncomplete"))
+        self.assertEqual(st.read_request_snapshot("sym", new, "abc123")["prompt"], "real")

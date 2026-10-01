@@ -40,6 +40,9 @@ export const api = {
   ideas: id => call('GET', `courses/${id}/ideas`),
   engineDo: (id, body) => call('POST', `courses/${id}/engine`, body),
   engineStop: id => call('POST', `courses/${id}/engine/stop`, {}),
+  // Deciding between two answers the review already gave. It asks nothing of the model, so it is not an
+  // engine action and does not wait for the Claude tool to be ready.
+  decideAttribution: (id, body) => call('POST', `courses/${id}/attribution-resolution`, body),
   saveExport: (id, body) => call('POST', `courses/${id}/exports`, body),
   backupUrl: id => url(`courses/${id}/backup`),
   importUrl: hash => url(`imports/${hash}`)

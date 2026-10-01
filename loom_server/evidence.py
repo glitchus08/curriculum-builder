@@ -761,6 +761,22 @@ def original_status(source: dict, attribution_verdict: str | None) -> dict:
                     "not_judged": "the attribution review returned no judgement for this source",
                     "stale": "the attribution review judged an earlier version of this evidence, and what it judged has since changed"}.get(
                         attribution_verdict, f"the attribution review said {attribution_verdict}"))
+    # The badge and the graph must not say different things about the same source. "Original source verified"
+    # appeared beside a work the graph was holding at an unresolved identity, because this looked only at the
+    # aggregate verdict, which still reads "yes" while two runs contradict each other about who made the work.
+    att = source.get("attribution")
+    live = (att or {}).get("unresolvedDisagreements") if isinstance(att, dict) else None
+    if live:
+        if not isinstance(live, list):
+            why.append("this source carries a record of disagreement that Loom cannot read, so its identity "
+                       "cannot be called confirmed")
+        else:
+            for d in live:
+                aspect = d.get("aspect") if isinstance(d, dict) else None
+                what = {"identity": "who made it", "role": "what kind of source it is",
+                        "lineage_supported": "whether it supports descent"}.get(aspect, "this source")
+                why.append(f"two runs of the attribution review disagree about {what} on the same evidence, and "
+                           f"nobody has decided between them")
     return {"status": "verified" if not why else "not_verified", "because": why}
 
 

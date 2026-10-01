@@ -373,8 +373,11 @@ def restore(store, bundle: dict) -> dict:
                 eng["status"] = "paused"
                 eng["pause"] = {"kind": "restored", "reason": "This course was restored from a backup while work was unfinished.", "at": now_iso()}
             _place_prepared(store, meta["id"], bundle.get("prepared"), eng)
+            if gap := _place_provenance(store, meta["id"], bundle.get("provenance")):
+                eng["provenanceIncomplete"] = dict(gap, restoredAt=now_iso())
             write_atomic(d / "engine.json", json.dumps(eng, indent=1))
-        _place_provenance(store, meta["id"], bundle.get("provenance"))
+        if not isinstance(bundle.get("engine"), dict):
+            _place_provenance(store, meta["id"], bundle.get("provenance"))
         for h in kept:
             write_atomic(d / "history" / h["file"], h["raw"])
         if isinstance(bundle.get("previous"), str) and bundle["previous"]:
@@ -530,21 +533,37 @@ def provenance_bundle(store, cid: str) -> dict:
         p = d / sub
         if not p.is_dir():
             continue
-        for f in sorted([x for x in p.iterdir() if x.is_file()], key=lambda x: x.stat().st_mtime, reverse=True):
+        # `is_file()` follows a symlink, so a link planted in these directories pulled a file from outside the
+        # course into the backup. A backup must contain the course and nothing else, so only real files that are
+        # really here are read, and anything else is named rather than silently skipped.
+        for f in sorted([x for x in p.iterdir() if x.is_file() and not x.is_symlink()],
+                        key=lambda x: x.stat().st_mtime, reverse=True):
+            if not _PROV_NAME.match(f.name):
+                got.setdefault("skipped", []).append(f.name)
+                continue
             size = f.stat().st_size
             if used + size > PROVENANCE_BYTES:
                 got["leftOut"] += 1
                 continue
             got[into].append({"file": f.name, "raw": f.read_text(encoding="utf-8")})
             used += size
+        for x in p.iterdir():
+            if x.is_symlink():
+                got.setdefault("skipped", []).append(x.name + " (a link out of the course, not copied)")
     return got
 
 
-def _place_provenance(store, cid: str, bundle) -> None:
-    """Write kept requests and archived judgements into a course. Names are checked, so nothing escapes the course."""
+def _place_provenance(store, cid: str, bundle) -> dict | None:
+    """Write kept requests and archived judgements into a course. Names are checked, so nothing escapes the course.
+
+    Returns what the restored course could NOT be given, so the gap can be written down where someone will see
+    it. A backup that left records behind restored silently: the new course looked like a complete record of
+    everything ever asked and answered, and nothing in it said otherwise.
+    """
     if not isinstance(bundle, dict):
-        return
+        return None
     d = course_dir(store, cid)
+    refused: list = []
     for into, sub in (("requests", "requests"), ("judgements", "attribution-history")):
         items = bundle.get(into)
         if not isinstance(items, list):
@@ -554,9 +573,20 @@ def _place_provenance(store, cid: str, bundle) -> None:
                 continue
             name, raw = str(it.get("file") or ""), it.get("raw")
             if not isinstance(raw, str) or not _PROV_NAME.match(name):
+                refused.append(str(name)[:80])
                 continue
             (d / sub).mkdir(exist_ok=True)
             write_atomic(d / sub / name, raw)
+    left = bundle.get("leftOut")
+    skipped = bundle.get("skipped") if isinstance(bundle.get("skipped"), list) else []
+    if not (isinstance(left, int) and left > 0) and not skipped and not refused:
+        return None
+    return {"recordsNotInThisCopy": left if isinstance(left, int) else 0,
+            "notCopiedFromTheOriginal": [str(x)[:80] for x in skipped][:50],
+            "refusedOnRestore": refused[:50],
+            "whatThisMeans": ("This course was restored from a backup that did not carry every request and "
+                              "judgement the original had. What is here is real; it is not the whole record. "
+                              "The original course still holds the rest.")}
 
 
 EXPORT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,150}\.(json|html)$")

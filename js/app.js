@@ -941,6 +941,27 @@ const A = {
 // No button may fail silently. If an action breaks, say so where the person is looking.
 function oops(e) { console.error('Loom action failed', e); err('That did not work, and nothing was lost. Try again, or go Back. (' + e.message + ')', picker.open ? '#perr' : sheet.open ? '#lerr' : '#err'); }
 function run(f, v, el) { try { const r = f(v, el); if (r && typeof r.catch === 'function') r.catch(oops); } catch (e) { oops(e); } }
+// Deciding between two answers the attribution review already gave. It is handled here, outside the engine
+// actions, because it asks nothing of Claude: a person who has read the document says which answer stands.
+document.addEventListener('click', async e => {
+  const b = e.target.closest('.decide [data-chosen]');
+  if (!b) return;
+  const box = b.closest('.decide');
+  const because = (box.querySelector('.because') || {}).value || '';
+  const why = (box.querySelector('.why') || {}).value || '';
+  if (!because.trim() || !why.trim()) { say('Say which words in the document settle it, and why.'); return; }
+  box.querySelectorAll('[data-chosen]').forEach(x => { x.disabled = true; });
+  try {
+    await api.decideAttribution(course.id, { claimKey: box.dataset.claim, disagreement: box.dataset.key,
+      chosen: b.dataset.chosen, becauseWords: because, reason: why, by: 'the person at this computer' });
+    say('Decision recorded. Nothing was asked of Claude.');
+    await pollEngine();
+  } catch (e) {
+    box.querySelectorAll('[data-chosen]').forEach(x => { x.disabled = false; });
+    say(e.message);
+  }
+});
+
 document.addEventListener('click', e => { const el = e.target.closest('[data-a]'); if (!el || el.disabled) return; if (el.getAttribute('aria-disabled') === 'true' && !['weave', 'weaveReal'].includes(el.dataset.a)) return; const f = A[el.dataset.a]; if (f) run(f, el.dataset.v, el); });
 document.addEventListener('pointerdown', () => { kbd = false; document.documentElement.removeAttribute('data-kbd'); });
 document.addEventListener('keydown', e => {

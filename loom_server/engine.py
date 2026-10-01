@@ -572,6 +572,129 @@ def request_settings() -> dict:
             "testDouble": bool(os.environ.get("LOOM_CLAUDE_BIN"))}
 
 
+_DECIDABLE = ("yes", "partly", "no", "cannot_tell")
+
+
+def valid_resolution(dkey: str, r, fingerprint: str | None):
+    """A person's decision on one disagreement, or None. Nothing less than a real decision counts.
+
+    A decision names who made it, when, which answer stands, the words in the document that settle it and why.
+    It is tied to the evidence it was made on: if the page, the quotation or the retrieved bytes change
+    afterwards, the decision was about something else and the question reopens. An answer Loom does not
+    recognise is not a decision either, so a typo cannot quietly settle anything.
+    """
+    if not isinstance(r, dict):
+        return None
+    if r.get("evidenceFingerprint") != fingerprint:
+        return None
+    if not all(str(r.get(f) or "").strip() for f in ("by", "at", "chosen", "becauseWords", "reason")):
+        return None
+    allowed = ("yes", "partly", "no") if dkey == "overall" else _DECIDABLE
+    return r if r.get("chosen") in allowed else None
+
+
+def apply_resolutions(entry: dict, resolutions) -> dict:
+    """The judgement as it stands after a person has decided, with what the model said kept beside it.
+
+    A decision used to clear the warning and change nothing else, so choosing "no" removed the sign of trouble
+    and left the effective verdict at "yes" — the worst of both, because the claim then looked settled in
+    Loom's favour precisely because someone had rejected it. The chosen answer now governs, and the aggregate is
+    worked out again from the decided fields rather than left at whatever the model last said.
+
+    This is a pure function of saved data. Recording a decision therefore takes effect at once and never needs
+    another model run, which also means a person is never asked to spend a review to register their own answer.
+    """
+    live = entry.get("unresolvedDisagreements")
+    if not isinstance(live, list) or not live or not isinstance(resolutions, dict):
+        return entry
+    out = dict(entry)
+    detail = dict(out.get("detail")) if isinstance(out.get("detail"), dict) else {}
+    rels = [dict(r) if isinstance(r, dict) else r for r in detail.get("relationships") or []] \
+        if isinstance(detail.get("relationships"), list) else detail.get("relationships")
+    still, decided = [], []
+    for d in live:
+        dkey = d.get("key") if isinstance(d, dict) else None
+        r = valid_resolution(str(dkey), resolutions.get(dkey), out.get("fingerprint")) if dkey else None
+        if not r:
+            still.append(d)
+            continue
+        chosen = r["chosen"]
+        if dkey == "identity":
+            detail["identity_correct"] = chosen
+        elif dkey == "role":
+            detail["role_correct"] = chosen
+        elif dkey == "lineage_supported":
+            detail["lineage_supported"] = chosen
+        elif dkey == "overall":
+            out["verdict"] = chosen
+        elif isinstance(rels, list):
+            for r_ in rels:
+                if isinstance(r_, dict) and lineage.disagreement_key(
+                        "relationship", r_.get("earlier_work"), r_.get("relation")) == dkey:
+                    r_["supported"] = chosen
+        decided.append({"about": d.get("aspect"), "key": dkey, "chosen": chosen, "by": r.get("by"),
+                        "at": r.get("at"), "becauseWords": r.get("becauseWords"), "reason": r.get("reason"),
+                        "theModelHadSaid": {"earlier": d.get("earlier"), "later": d.get("later")}})
+    if not decided:
+        return entry
+    # What the model answered is never overwritten by what a person decided. Both are kept, and which is which
+    # is never in doubt.
+    out.setdefault("theModelsOwnAnswer", {"verdict": entry.get("verdict"), "detail": entry.get("detail")})
+    if isinstance(rels, list):
+        detail["relationships"] = rels
+    out["detail"] = detail
+    out["decidedByAPerson"] = decided
+    if not any(x["key"] == "overall" for x in decided):
+        # The aggregate is a consequence of identity, role and descent, so it is worked out again rather than
+        # left saying "yes" because that is what the model said before anyone looked.
+        ident, role = detail.get("identity_correct"), detail.get("role_correct")
+        good = ident == "yes" and role == "yes" and detail.get("lineage_supported") in ("yes", "none_claimed")
+        out["verdict"] = "yes" if good else "no" if "no" in (ident, role) else "partly"
+    if still:
+        out["unresolvedDisagreements"] = still
+    else:
+        out.pop("unresolvedDisagreements", None)
+    return out
+
+
+def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict) -> dict:
+    """Write one person's decision about one disagreement. No model is asked anything.
+
+    Deciding between two answers the review already gave is a judgement about a document a person has read. It
+    needs no new review, and spending one would be a third answer rather than a decision about the first two.
+    Nothing here touches an outline, an approval or any other stage: it writes one record and stops.
+    """
+    rec = storage.read_engine(store, cid)
+    if not isinstance(rec, dict):
+        raise storage.NotFound("That course has no saved work.")
+    rs = ((rec.get("stages") or {}).get("research") or {})
+    entry = (rs.get("attribution") or {}).get(claim_key)
+    if not isinstance(entry, dict):
+        raise storage.StoreError("Loom has no attribution judgement for that source.")
+    live = [d for d in entry.get("unresolvedDisagreements") or [] if isinstance(d, dict)]
+    if not any(d.get("key") == dkey for d in live):
+        raise storage.StoreError("There is no open disagreement about that to decide.")
+    want = {k: str(decision.get(k) or "").strip() for k in ("by", "chosen", "becauseWords", "reason")}
+    if not all(want.values()):
+        raise storage.StoreError("A decision needs who made it, which answer stands, the words in the document "
+                                 "that settle it, and why.")
+    now = dict(want, at=storage.now_iso(), evidenceFingerprint=entry.get("fingerprint"))
+    if not valid_resolution(dkey, now, entry.get("fingerprint")):
+        raise storage.StoreError(f"{want['chosen']!r} is not an answer Loom recognises for that question.")
+    held = (rs.get("attributionResolutions") or {}).get(claim_key, {}).get(dkey)
+    if isinstance(held, dict) and held.get("chosen"):
+        # Someone decided this already, perhaps in another window. Their decision is not overwritten by a
+        # request that was written without knowing about it; replacing it means saying which one you saw.
+        if str(decision.get("replacing") or "") != str(held.get("at") or ""):
+            raise storage.Conflict("Someone else has already decided this. Reload to see their decision.",
+                                   held.get("at"))
+        now["replaced"] = {"chosen": held.get("chosen"), "by": held.get("by"), "at": held.get("at")}
+    rs.setdefault("attributionResolutions", {}).setdefault(claim_key, {})[dkey] = now
+    rec.setdefault("stages", {}).setdefault("research", rs)
+    storage.write_engine(store, cid, rec)
+    return now
+
+
 def attribution_material(s: dict, text: str | None = None) -> dict:
     """Exactly what an attribution verdict was judged against, for one source.
 
@@ -1193,6 +1316,11 @@ class Runner:
                     av = {"verdict": "stale", "supersededFingerprint": av.get("fingerprint"), "fingerprint": now_print,
                           "reason": "The evidence this judgement was made on has changed, so it no longer applies.",
                           "detail": av.get("detail"), "at": av.get("at")}
+            # A person's decisions are applied HERE, on the way out, not during a review run. Applying them only
+            # inside the reviewer meant a decision did nothing until somebody spent another model call, which is
+            # both a waste and a trap: the screen would keep showing a conflict that had already been settled.
+            if av:
+                av = apply_resolutions(av, (st.get("attributionResolutions") or {}).get(ck))
             merged["sources"][i]["attribution"] = av or None
             merged["sources"][i]["originalSource"] = evidence.original_status(merged["sources"][i], av.get("verdict") if av else None)
         # Works and how they descend are worked out from the finished source records, so re-running research or a
@@ -1663,7 +1791,7 @@ class Runner:
         history = rs.setdefault("attributionHistory", {})
         # Decisions a person has made about contradictions the review produced. Loom never writes these from a
         # model run: a disagreement is settled by someone reading the document, or it is not settled at all.
-        resolutions = rs.setdefault("attributionResolutions", {})
+        rs.setdefault("attributionResolutions", {})  # a person's decisions; applied when the record is read
         run_id = secrets.token_hex(8)
         # What produced this run, kept with it, so a later disagreement can be read against what actually differed.
         # Three different questions, kept apart because they are answered differently. Equal EVIDENCE is
@@ -1694,22 +1822,6 @@ class Runner:
                 if isinstance(r, dict):
                     out[lineage.disagreement_key("relationship", r.get("earlier_work"), r.get("relation"))] = r.get("supported")
             return out
-
-        def resolution_for(claim_key, dkey, entry):
-            """A person's decision on one disagreement, or None. Nothing less than a real decision counts.
-
-            A resolution has to name who made it, when, which answer stands, the words in the document that
-            settle it and why. It is also tied to the evidence it was made on: if the page, the quotation or the
-            retrieved bytes change afterwards, the decision was about something else and the question reopens.
-            """
-            r = (resolutions.get(claim_key) or {}).get(dkey)
-            if not isinstance(r, dict):
-                return None
-            if r.get("evidenceFingerprint") != entry.get("fingerprint"):
-                return None
-            if not all(str(r.get(f) or "").strip() for f in ("by", "at", "chosen", "becauseWords", "reason")):
-                return None
-            return r
 
         def remember(claim_key, entry):
             """Append this judgement to the source's history and record what it contradicts, question by question.
@@ -1756,17 +1868,14 @@ class Runner:
                                            " NOTE: the rest of the request — the judge rules or the answer schema — "
                                            "also changed between these two runs, so this difference is NOT evidence "
                                            "about the model alone and must not be counted as one.")}
-            settled = {}
-            for dkey in list(live):
-                if r := resolution_for(claim_key, dkey, entry):
-                    settled[dkey] = dict(live.pop(dkey), resolvedBy=r)
+            # Everything contradicted is recorded raw. Whether a person has since decided any of it is applied
+            # when the record is read, so the history keeps what the model actually said rather than a version
+            # of the past edited by a later decision.
             if live:
                 entry["unresolvedDisagreements"] = list(live.values())
-            if settled:
-                entry["resolvedDisagreements"] = list(settled.values())
             # Kept for anything still reading the older single-verdict field. It says only what it ever said:
             # whether the aggregate verdict moved.
-            if agg := live.get("overall") or settled.get("overall"):
+            if agg := live.get("overall"):
                 entry["disagreesWithEarlierRun"] = {"earlierVerdict": agg.get("earlier"), "earlierRunId": agg.get("earlierRunId"),
                                                     "earlierAt": agg.get("earlierAt"), "sameEvidence": True,
                                                     "sameWholeRequest": agg.get("sameWholeRequest"), "note": agg.get("note")}

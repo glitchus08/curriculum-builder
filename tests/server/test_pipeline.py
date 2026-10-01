@@ -2654,43 +2654,97 @@ class DisagreementIsDetectedQuestionByQuestion(unittest.TestCase):
         self.assertTrue(live, "an unsettled question is not settled by asking again and getting the same answer")
         self.assertEqual([d["aspect"] for d in live], ["identity"])
 
-    def test_only_a_person_s_recorded_decision_clears_a_disagreement(self):
-        f, cid, rec = begin("attrib-resolution")
-        rec = self._run(cid)
-        key = self._key(rec)
+    def _merged_source(self, cid):
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        return r["stages"]["research"]["output"]["sources"][0], r
+
+    def _raise_identity_conflict(self, cid):
+        key = self._key(self._run(cid))
         r = engine.runner("pipe", cid).load()
         h = r["stages"]["research"]["attributionHistory"][key]
         h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no"))
         engine.runner("pipe", cid).save(r)
         rec = self._run(cid)
-        cur = rec["stages"]["research"]["attribution"][key]
-        self.assertTrue(cur.get("unresolvedDisagreements"))
-        fp = cur["fingerprint"]
+        return key, rec["stages"]["research"]["attribution"][key]["fingerprint"]
+
+    def _decide(self, cid, key, dkey, chosen, fingerprint, **over):
+        r = engine.runner("pipe", cid).load()
+        d = {"by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": chosen,
+             "becauseWords": "the masthead names the author", "reason": "read the document",
+             "evidenceFingerprint": fingerprint}
+        d.update(over)
+        r["stages"]["research"]["attributionResolutions"] = {key: {dkey: d}}
+        engine.runner("pipe", cid).save(r)
+
+    def test_only_a_person_s_recorded_decision_clears_a_disagreement(self):
+        f, cid, rec = begin("attrib-resolution")
+        key, fp = self._raise_identity_conflict(cid)
+        s_, _ = self._merged_source(cid)
+        self.assertTrue(s_["attribution"].get("unresolvedDisagreements"))
 
         # An incomplete decision is not a decision: each of these is missing something a person has to supply.
-        for partial in ({"by": "A Person"},
-                        {"by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes"},
-                        {"by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes",
-                         "becauseWords": "the masthead names the author", "reason": "checked the document",
-                         "evidenceFingerprint": "a-different-fingerprint"}):
-            r = engine.runner("pipe", cid).load()
-            r["stages"]["research"]["attributionResolutions"] = {key: {"identity": partial}}
-            engine.runner("pipe", cid).save(r)
-            rec = self._run(cid)
-            self.assertTrue(rec["stages"]["research"]["attribution"][key].get("unresolvedDisagreements"),
-                            f"{sorted(partial)} is not a decision anyone can audit")
+        for partial in ({"by": ""}, {"becauseWords": ""}, {"reason": ""}, {"at": ""},
+                        {"evidenceFingerprint": "a-different-fingerprint"}, {"chosen": "probably"}, {"chosen": ""}):
+            self._decide(cid, key, "identity", partial.pop("chosen", "yes"), fp, **partial)
+            s_, _ = self._merged_source(cid)
+            self.assertTrue(s_["attribution"].get("unresolvedDisagreements"),
+                            f"{partial} is not a decision anyone can audit")
 
+        self._decide(cid, key, "identity", "yes", fp)
+        s_, _ = self._merged_source(cid)
+        self.assertFalse(s_["attribution"].get("unresolvedDisagreements"), "a complete decision settles it")
+        self.assertEqual(s_["attribution"]["decidedByAPerson"][0]["by"], "A Person")
+        self.assertEqual(s_["attribution"]["detail"]["identity_correct"], "yes")
+
+    def test_a_person_choosing_no_is_not_reduced_to_clearing_the_warning(self):
+        """Choosing "no" used to remove the sign of trouble and leave the effective verdict at "yes" — the worst
+        of both, because the claim then looked settled in Loom's favour precisely because someone rejected it."""
+        f, cid, rec = begin("attrib-resolution-no")
+        key, fp = self._raise_identity_conflict(cid)
+        self._decide(cid, key, "identity", "no", fp)
+        s_, _ = self._merged_source(cid)
+        att = s_["attribution"]
+        self.assertFalse(att.get("unresolvedDisagreements"), "the question is settled")
+        self.assertEqual(att["detail"]["identity_correct"], "no", "and settled the way the person settled it")
+        self.assertEqual(att["verdict"], "no", "the aggregate follows the decision, not the model's last answer")
+        self.assertEqual(s_["originalSource"]["status"], "not_verified",
+                         "a rejected identity cannot leave the source badged as a verified original")
+        self.assertIsNotNone(att.get("theModelsOwnAnswer"), "what the model said is kept beside the decision")
+
+    def test_a_decision_takes_effect_without_another_model_call(self):
+        f, cid, rec = begin("attrib-resolution-nocall")
+        key, fp = self._raise_identity_conflict(cid)
+        before = len(log(f))
+        self._decide(cid, key, "identity", "no", fp)
+        s_, _ = self._merged_source(cid)
+        self.assertEqual(s_["attribution"]["detail"]["identity_correct"], "no", "the decision is already in force")
+        self.assertEqual(len(log(f)), before, "and nothing was asked of the model to put it there")
+
+    def test_a_decision_made_on_evidence_that_has_since_changed_reopens_the_question(self):
+        f, cid, rec = begin("attrib-resolution-stale")
+        key, fp = self._raise_identity_conflict(cid)
+        self._decide(cid, key, "identity", "yes", fp)
+        s_, _ = self._merged_source(cid)
+        self.assertFalse(s_["attribution"].get("unresolvedDisagreements"))
+        # The page changes under the decision. It was a decision about something else.
         r = engine.runner("pipe", cid).load()
-        r["stages"]["research"]["attributionResolutions"] = {key: {"identity": {
-            "by": "A Person", "at": "2026-10-01T00:00:00Z", "chosen": "yes",
-            "becauseWords": "the masthead names the author", "reason": "read the document and the earlier run was wrong",
-            "evidenceFingerprint": fp}}}
+        rs = r["stages"]["research"]
+        cur = dict(rs["attribution"][key])
+        rs["attribution"][key] = dict(cur, fingerprint="the-evidence-moved-on")
         engine.runner("pipe", cid).save(r)
-        rec = self._run(cid)
-        cur = rec["stages"]["research"]["attribution"][key]
-        self.assertFalse(cur.get("unresolvedDisagreements"), "a complete decision on this evidence settles it")
-        self.assertTrue(cur.get("resolvedDisagreements"), "and what was decided is kept, not erased")
-        self.assertEqual(cur["resolvedDisagreements"][0]["resolvedBy"]["by"], "A Person")
+        s_, _ = self._merged_source(cid)
+        self.assertNotEqual(s_["attribution"].get("verdict"), "yes",
+                            "a decision does not carry over to evidence it was not made on")
+
+    def test_the_history_keeps_what_the_model_said_whatever_a_person_decided(self):
+        f, cid, rec = begin("attrib-resolution-history")
+        key, fp = self._raise_identity_conflict(cid)
+        self._decide(cid, key, "identity", "no", fp)
+        self._merged_source(cid)
+        hist = engine.runner("pipe", cid).load()["stages"]["research"]["attributionHistory"][key]
+        self.assertTrue(any(h.get("detail", {}).get("identity_correct") == "yes" for h in hist),
+                        "the model's own answers are not edited by a later decision")
 
 
 class EveryClaimReachesTheReviewer(unittest.TestCase):
@@ -3006,3 +3060,147 @@ class TheWriterIsToldWhatIsContested(unittest.TestCase):
         self.assertIn("the_attribution_review_disagrees_with_itself", rules)
         self.assertIn("It is NOT a weaker yes and it is NOT a no", rules)
         self.assertIn("do not pick the answer that suits the lesson", rules)
+
+
+class DecidingNeedsNoModel(unittest.TestCase):
+    """The endpoint a person uses to settle a disagreement the review left open.
+
+    It is deliberately not an engine action. Engine actions refuse when the Claude tool is not ready, and
+    deciding between two answers the review already gave needs no model: spending one would produce a third
+    answer, not a decision about the first two.
+    """
+
+    def _ready(self):
+        f, cid, rec = begin("decide-endpoint")
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        rec = wait(cid)
+        key = next(iter(rec["stages"]["research"]["attributionHistory"]))
+        r = engine.runner("pipe", cid).load()
+        h = r["stages"]["research"]["attributionHistory"][key]
+        h[-1] = dict(h[-1], detail=dict(h[-1]["detail"], identity_correct="no"))
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid).start("attribution_review", {"action": "attribution_review"})
+        wait(cid)
+        return f, cid, key
+
+    def _decide(self, cid, key, **over):
+        d = {"by": "A Person", "chosen": "no", "becauseWords": "the masthead names the author",
+             "reason": "read the document"}
+        d.update(over)
+        return engine.record_resolution("pipe", cid, key, "identity", d)
+
+    def test_a_decision_is_recorded_and_changes_the_effective_judgement(self):
+        f, cid, key = self._ready()
+        got = self._decide(cid, key)
+        self.assertEqual(got["chosen"], "no")
+        self.assertTrue(got["at"], "a decision says when it was made")
+        r = engine.runner("pipe", cid).load()
+        engine.runner("pipe", cid)._merge_research(r)
+        att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
+        self.assertEqual(att["detail"]["identity_correct"], "no")
+        self.assertEqual(att["verdict"], "no", "choosing no is not reduced to clearing the warning")
+
+    def test_an_incomplete_or_unrecognised_decision_is_refused(self):
+        f, cid, key = self._ready()
+        for bad in ({"by": ""}, {"becauseWords": "   "}, {"reason": ""}, {"chosen": ""}, {"chosen": "probably"}):
+            with self.assertRaises(storage.StoreError, msg=str(bad)):
+                self._decide(cid, key, **bad)
+
+    def test_a_question_that_is_not_open_cannot_be_decided(self):
+        f, cid, key = self._ready()
+        with self.assertRaises(storage.StoreError):
+            engine.record_resolution("pipe", cid, key, "role", {"by": "A", "chosen": "yes",
+                                                                "becauseWords": "w", "reason": "r"})
+        with self.assertRaises(storage.StoreError):
+            engine.record_resolution("pipe", cid, "no-such-claim", "identity",
+                                     {"by": "A", "chosen": "yes", "becauseWords": "w", "reason": "r"})
+
+    def test_a_second_decision_does_not_silently_overwrite_the_first(self):
+        f, cid, key = self._ready()
+        first = self._decide(cid, key, chosen="no")
+        with self.assertRaises(storage.Conflict):
+            self._decide(cid, key, chosen="yes")
+        got = self._decide(cid, key, chosen="yes", replacing=first["at"])
+        self.assertEqual(got["replaced"]["chosen"], "no", "the decision it replaced is kept, not erased")
+
+    def test_deciding_asks_nothing_of_the_model_and_approves_nothing(self):
+        f, cid, key = self._ready()
+        before, status_before = len(log(f)), engine.runner("pipe", cid).load().get("status")
+        self._decide(cid, key)
+        rec = engine.runner("pipe", cid).load()
+        self.assertEqual(len(log(f)), before, "no request was sent to Claude")
+        self.assertEqual(rec.get("status"), status_before, "the course did not move stage")
+        self.assertIsNot(rec.get("approved"), True, "and nothing was approved")
+
+
+class TheEvidenceBudgetIsActuallyKept(unittest.TestCase):
+    """A claimed quotation of any length used to become the passage, bypassing the budget entirely."""
+
+    def test_one_enormous_quotation_cannot_exceed_the_window(self):
+        from loom_server import prompts
+        huge = "z" * 9000
+        s_ = {"id": "S9", "url": "https://e.org/p",
+              "lineage": [{"relation": "extended", "earlier_work": "W", "supporting_words": huge}]}
+        got = prompts.attribution_reviewer_input(s_, "prefix " + huge + " suffix")[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertLessEqual(len(got[0]["passage"]), prompts._RELATION_WINDOW)
+        self.assertIn("not all of it", got[0]["note"], "the reviewer is told it is seeing part of the quotation")
+        self.assertIn("cannot_tell", got[0]["note"])
+
+    def test_the_whole_set_stays_within_budget_even_when_every_quotation_is_enormous(self):
+        from loom_server import prompts
+        words = ["q" * 9000 + str(i) for i in range(9)]
+        s_ = {"id": "S9", "url": "https://e.org/p",
+              "lineage": [{"relation": "extended", "earlier_work": f"W{i}", "supporting_words": w}
+                          for i, w in enumerate(words)]}
+        got = prompts.attribution_reviewer_input(s_, " ".join(words))[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertLessEqual(sum(len(g["passage"] or "") for g in got), prompts._RELATION_PASSAGE_BUDGET)
+
+    def test_the_words_claimed_are_still_reported_in_full_length_terms(self):
+        from loom_server import prompts
+        s_ = {"id": "S9", "url": "https://e.org/p",
+              "lineage": [{"relation": "extended", "earlier_work": "W", "supporting_words": "z" * 9000}]}
+        got = prompts.attribution_reviewer_input(s_, "z" * 9000)[
+            "the_passages_that_show_each_claimed_relationship"]
+        self.assertLessEqual(len(got[0]["words_claimed"]), 300, "the claim itself is also bounded")
+        self.assertIn("9000 characters long", got[0]["note"], "but its real length is not hidden")
+
+
+class TheSourceBadgeAgreesWithTheGraph(unittest.TestCase):
+    """"Original source verified" appeared beside a work the graph was holding at an unresolved identity."""
+
+    def _src(self):
+        words = "we introduce the method described here"
+        return {"id": "S1", "url": "https://e.org/a", "title": "A first report", "authors": ["Ada Ito"],
+                "published": "1998", "identifier": "doi:10.1234/first", "role": "original_contribution",
+                "quote": words, "evidenceLevel": "direct_text_quote_found",
+                "directRetrieval": {"sha256": "a" * 64, "quoteVerbatim": True,
+                                    "locator": {"charStart": 0, "charEnd": 9}},
+                "directExcerpt": words + " and more", "lineage": [],
+                "attribution": {"verdict": "yes",
+                                "detail": {"identity_correct": "yes", "role_correct": "yes",
+                                           "lineage_supported": "none_claimed"},
+                                "unresolvedDisagreements": [{"aspect": "identity", "key": "identity",
+                                                             "earlier": "no", "later": "yes"}]}}
+
+    def test_a_contested_identity_is_not_badged_as_a_verified_original(self):
+        from loom_server import evidence, lineage
+        s_ = self._src()
+        badge = evidence.original_status(s_, "yes")
+        work = next(iter(lineage.build([s_])["works"].values()))
+        self.assertEqual(badge["status"], "not_verified")
+        self.assertEqual(work["originStatus"], "unknown")
+        self.assertTrue(any("disagree" in b for b in badge["because"]), badge["because"])
+
+    def test_an_unreadable_disagreement_record_also_withholds_the_badge(self):
+        from loom_server import evidence
+        s_ = self._src()
+        s_["attribution"]["unresolvedDisagreements"] = "not a list"
+        self.assertEqual(evidence.original_status(s_, "yes")["status"], "not_verified")
+
+    def test_a_settled_source_still_earns_the_badge(self):
+        from loom_server import evidence
+        s_ = self._src()
+        s_["attribution"].pop("unresolvedDisagreements")
+        self.assertEqual(evidence.original_status(s_, "yes")["status"], "verified")

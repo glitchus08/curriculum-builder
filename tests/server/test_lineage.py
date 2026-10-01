@@ -619,3 +619,59 @@ class AnUnresolvedDisagreementBlocksSupport(unittest.TestCase):
         self.assertEqual(chain["supportedExtensions"], [], "an undecided extension is not a supported one")
         self.assertEqual(len(chain["awaitingAPersonsDecision"]), 1)
         self.assertEqual(len(chain["claimedButNotEstablished"]), 1)
+
+
+class DefectsCodexReproduced(unittest.TestCase):
+    """Each of these reproduces an audit finding against the published branch before its fix."""
+
+    WORDS = "we introduce the method described here"
+
+    def _src(self, sid, attribution, role="primary_extension"):
+        return src(id=sid, url="https://e.org/later", identifier="doi:10.5555/later", title="A later work",
+                   role=role, quote=self.WORDS, directExcerpt=self.WORDS + " and give its limits",
+                   lineage=[{"relation": "applied", "earlier_work": "rfc8089", "supporting_words": self.WORDS,
+                             "what_changed": "a", "limits": ""}],
+                   attribution=attribution)
+
+    def _earlier(self):
+        return {"id": "NAMED:rfc8089", "url": "https://e.org/rfc8089", "title": "A", "authors": ["A"],
+                "published": "1998", "identifier": "rfc8089", "role": "original_contribution",
+                "evidenceLevel": "direct_text", "directRetrieval": {"sha256": "e" * 64}, "lineage": []}
+
+    def _detail(self):
+        return {"identity_correct": "yes", "role_correct": "yes", "lineage_supported": "yes",
+                "relationships": [{"earlier_work": "rfc8089", "relation": "applied", "supported": "yes",
+                                   "reason": "shown"}]}
+
+    def test_a_clean_copy_cannot_overwrite_a_contested_one_whichever_arrives_first(self):
+        """Only `disputed` was protected on merge, so the standing of an assertion depended on arrival order."""
+        d = {"aspect": "relationship", "key": lineage.disagreement_key("relationship", "rfc8089", "applied"),
+             "earlier": "no", "later": "yes", "sameEvidence": True, "sameWholeRequest": True}
+        contested = self._src("S1", {"verdict": "yes", "detail": self._detail(), "unresolvedDisagreements": [d]})
+        clean = self._src("S2", {"verdict": "yes", "detail": self._detail()})
+        first = lineage.build([contested, clean, self._earlier()])
+        second = lineage.build([clean, contested, self._earlier()])
+        self.assertEqual(first["edges"][0]["status"], "unresolved")
+        self.assertEqual(second["edges"][0]["status"], "unresolved",
+                         "a contradiction is not cancelled by another record of the same assertion looking fine")
+        self.assertEqual(first["summary"]["unresolvedEdges"], second["summary"]["unresolvedEdges"])
+
+    def test_a_disputed_reading_still_wins_over_a_contested_one(self):
+        d = {"aspect": "relationship", "key": lineage.disagreement_key("relationship", "rfc8089", "applied"),
+             "earlier": "no", "later": "yes"}
+        contested = self._src("S1", {"verdict": "yes", "detail": self._detail(), "unresolvedDisagreements": [d]})
+        refused = dict(self._detail(), relationships=[{"earlier_work": "rfc8089", "relation": "applied",
+                                                       "supported": "no", "reason": "not shown"}])
+        rejected = self._src("S2", {"verdict": "partly", "detail": refused})
+        for order in ([contested, rejected], [rejected, contested]):
+            self.assertEqual(lineage.build(order + [self._earlier()])["edges"][0]["status"], "disputed",
+                             "a finding against the claim outranks an undecided one")
+
+    def test_a_review_record_of_any_shape_cannot_bring_the_graph_down(self):
+        for bad in ("a string", 7, ["a list"], None, {"detail": "not a mapping"},
+                    {"verdict": "yes", "detail": {"relationships": 7}},
+                    {"verdict": "yes", "detail": {"relationships": "a string"}},
+                    {"verdict": "yes", "detail": self._detail(), "unresolvedDisagreements": 7}):
+            built = lineage.build([self._src("S1", bad), self._earlier()])
+            self.assertNotEqual(built["edges"][0]["status"], "supported",
+                                f"a damaged record is not a clean bill of health: {bad!r}")

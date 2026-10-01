@@ -1133,11 +1133,19 @@ def _relationship_passages(s: dict, text: str | None) -> list:
             entry["note"] = ("These words were NOT found in the text Loom retrieved. Judge the relationship on that: "
                              "do not assume the passage exists somewhere Loom did not keep.")
         else:
-            start = max(0, at - window // 2)
+            # The window is the whole passage, not padding around a quotation of any length. Adding the claimed
+            # words to it meant one 9,000-character "quotation" produced a 9,000-character passage and the budget
+            # the rest of this function keeps was simply bypassed.
+            shown = min(len(words), window)
+            start = max(0, min(at, at - (window - shown) // 2))
             entry["inspected"] = True
             entry["found_in_retrieved_text"] = True
             entry["character_offset_in_the_document"] = at
-            entry["passage"] = body[start:at + len(words) + window // 2]
+            entry["passage"] = body[start:start + window]
+            if len(words) > window:
+                entry["note"] = (f"The words claimed for this relationship are {len(words)} characters long and "
+                                 f"the passage shown is {window}. You are seeing the start of it, not all of it: "
+                                 f"judge what is shown and answer 'cannot_tell' if the rest would decide it.")
         out.append(entry)
     return out
 

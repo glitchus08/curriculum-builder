@@ -231,6 +231,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     raise storage.StoreError("The change request is incomplete.")
                 rec = engine.runner(store, cid).start(action, b)
                 return self.send_json({"record": rec, "busy": True})
+            if rest == ["attribution-resolution"] and method == "POST":
+                # Deliberately NOT under the engine route: that one refuses when the Claude tool is not ready,
+                # and a person deciding between two answers the review already gave needs no model at all.
+                b = self.body()
+                storage.course_dir(store, cid)
+                got = engine.record_resolution(store, cid, str(b.get("claimKey") or ""),
+                                               str(b.get("disagreement") or ""), b if isinstance(b, dict) else {})
+                return self.send_json({"decision": got})
             if rest == ["engine", "stop"] and method == "POST":
                 engine.runner(store, cid).halt()
                 return self.send_json({"ok": True})
