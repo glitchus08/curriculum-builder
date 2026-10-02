@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import copy
+import hashlib
 import ipaddress
 import json
 import os
@@ -704,16 +705,34 @@ def history_state(store, cid: str, rs: dict, claim_key: str) -> dict:
     Returns the usable entries and, where the count does not reconcile, exactly why.
     """
     marker = ((rs.get("attributionHistoryArchived") or {}).get(claim_key) or {})
+    bad_marker = not isinstance(marker, dict)
+    marker = marker if isinstance(marker, dict) else {}
     expected = marker.get("count")
-    expected = expected if isinstance(expected, int) and expected >= 0 else 0
+    bad_count = expected is not None and (type(expected) is not int or expected < 0)
+    expected = expected if type(expected) is int and expected >= 0 else 0
     got, failed = [], None
     try:
         got = storage.read_archived_judgements(store, cid, claim_key)
     except Exception as e:
         failed = type(e).__name__
-    usable = [h for h in got if isinstance(h, dict) and not h.get("unreadable")]
-    unreadable = [h for h in got if not isinstance(h, dict) or h.get("unreadable")]
+    def valid(h):
+        return (isinstance(h, dict) and not h.get("unreadable") and h.get("key") == claim_key
+                and isinstance(h.get("runId"), str) and bool(h["runId"])
+                and isinstance(h.get("fingerprint"), str) and bool(h["fingerprint"])
+                and h.get("verdict") in ("yes", "partly", "no", "not_judged")
+                and isinstance(h.get("detail"), dict))
+    usable, unreadable, seen = [], [], set()
+    for h in got:
+        identity = (h.get("runId"), h.get("fingerprint")) if isinstance(h, dict) else None
+        if not valid(h) or identity in seen:
+            unreadable.append(h)
+        else:
+            seen.add(identity)
+            usable.append(h)
     why = []
+    expected_file = "k" + hashlib.sha256(str(claim_key).encode()).hexdigest()[:24] + ".jsonl"
+    if bad_marker or bad_count or (marker.get("file") and marker["file"] != expected_file):
+        why.append("the archive manifest is invalid or names a different source file")
     if failed:
         why.append(f"the archive for this source could not be opened ({failed})")
     elif expected and not got and not marker.get("file"):
@@ -779,13 +798,15 @@ def effective_attribution(rs: dict, claim_key: str, store=None, cid: str | None 
     if not isinstance(entry, dict):
         return None
     av = apply_resolutions(entry, (rs.get("attributionResolutions") or {}).get(claim_key))
-    if store is not None and cid:
+    if cid:
         hs = history_state(store, cid, rs, claim_key)
         av = dict(av, historyIncomplete=hs["incomplete"]) if hs.get("incomplete") else \
             {k: v for k, v in av.items() if k != "historyIncomplete"}
     if av.get("unresolvedDisagreements"):
         av = dict(av, unresolvedDisagreements=open_questions(
             av, (rs.get("attributionResolutions") or {}).get(claim_key)))
+    av = dict(av, decisionHistory=[copy.deepcopy(e) for e in rs.get("attributionDecisions", [])
+                                   if isinstance(e, dict) and e.get("claimKey") == claim_key])
     return av
 
 
@@ -1536,8 +1557,8 @@ class Runner:
                 # answered against exactly that and nothing else.
                 if av.get("unresolvedDisagreements"):
                     av = dict(av, unresolvedDisagreements=open_questions(
-                        av, (st.get("attributionResolutions") or {}).get(ck)),
-                        decisionHistory=decision_history(rec, ck))
+                        av, (st.get("attributionResolutions") or {}).get(ck)))
+                av = dict(av, decisionHistory=decision_history(rec, ck))
             merged["sources"][i]["attribution"] = av or None
             # The claim key is what a decision is filed under, so the screen that offers the decision needs it.
             merged["sources"][i]["claimKey"] = ck
@@ -2006,7 +2027,7 @@ class Runner:
         # Two different requests can share a short fingerprint. Both are kept, each under its own name, and
         # this run records the name of ITS OWN request so a replay reads the one that was actually sent.
         first = storage.read_request_snapshot(self.store, self.cid, request_print)
-        collided = bool(first) and first.get("prompt") != p
+        collided = bool(first) and storage.request_identity(first) != storage.request_identity(request)
         r = self.call(rec, "attribution_review", "attribution_review", "A separate check of who made each source and how they connect", p, schema)
         out = r["output"]
         ids = {s_["id"]: s_ for s_ in srcs}
@@ -2086,7 +2107,9 @@ class Runner:
                 # Same evidence is not the same question. Only call it a disagreement about the model when the
                 # WHOLE request matched — same judge rules, same schema, same prompt — otherwise say plainly that
                 # the asking changed too, so the difference is never counted as evidence about the model alone.
-                same_request = (prev.get("provenance") or {}).get("requestFingerprint") == request_print
+                previous_ref = (prev.get("provenance") or {}).get("requestSnapshot")
+                same_request = (bool(previous_ref) and previous_ref == snapshot
+                                and (prev.get("provenance") or {}).get("requestFingerprint") == request_print)
                 was, now_ = answers_in(prev), answers_in(entry)
                 for dkey in list(was) + [k for k in now_ if k not in was]:
                     a, b = was.get(dkey), now_.get(dkey)
@@ -2687,6 +2710,31 @@ def read(store, cid: str) -> dict | None:
         # the progress screen as though a request were still going. The record of what ran is `calls`, which is kept.
         rec["now"] = None
         storage.write_engine(store, cid, rec)
+    if rec and isinstance(rec.get("stages", {}).get("research"), dict):
+        candidate = copy.deepcopy(rec)
+        rs = candidate["stages"]["research"]
+        prior_time = (rs.get("output") or {}).get("researchedAt")
+        try:
+            if rs.get("batches") and candidate["stages"].get("map", {}).get("output"):
+                runner(store, cid)._merge_research(candidate)
+                if prior_time is not None:
+                    rs["output"]["researchedAt"] = prior_time
+                candidate.pop("derivedStateStale", None)
+            else:
+                for source in (rs.get("output") or {}).get("sources", []):
+                    key = source.get("claimKey") or pipeline.claim_key(source)
+                    av = effective_attribution(rs, key, store, cid)
+                    if av:
+                        source["attribution"] = av
+                        source["claimKey"] = key
+                        source["originalSource"] = evidence.original_status(source, av.get("verdict"))
+            rec = candidate
+        except Exception as exc:
+            rec = copy.deepcopy(rec)
+            rec["derivedStateStale"] = {"because": type(exc).__name__,
+                "note": "Source views could not be refreshed. Saved decisions are retained; support is not current."}
+        rec["evidenceRevision"] = content_print([rec["stages"]["research"].get("output"),
+            rec.get("provenanceIncomplete"), rec.get("derivedStateStale")])
     if rec and isinstance(rec.get("stages", {}).get("review"), dict) and rec["stages"]["review"].get("input") is not None:
         rec = dict(rec, stages=dict(rec["stages"], review={k: v for k, v in rec["stages"]["review"].items() if k != "input"}))
     if rec and isinstance(rec.get("stages", {}).get("research"), dict) and (rec["stages"]["research"].get("cache") or rec["stages"]["research"].get("batches")):

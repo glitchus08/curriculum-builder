@@ -356,7 +356,7 @@ export function agentsFrom(E, outlineEdited) {
 
 // Evidence gathered after the draft was made (Loom's own retrieval, the attribution review) is copied onto the draft's sources.
 // A person's own check of a source is never touched. Returns how many sources changed.
-const EVIDENCE_KEYS = ['evidenceLevel', 'directRetrieval', 'directExcerpt', 'sourceReview', 'originalSource', 'attribution', 'strength', 'limits', 'auditUnresolved', 'quoteFound', 'quote', 'authors', 'published', 'version_or_edition', 'identifier', 'role', 'lineage'];
+const EVIDENCE_KEYS = ['claimKey', 'evidenceLevel', 'directRetrieval', 'directExcerpt', 'sourceReview', 'originalSource', 'attribution', 'strength', 'limits', 'auditUnresolved', 'quoteFound', 'quote', 'authors', 'published', 'version_or_edition', 'identifier', 'role', 'lineage'];
 export function mergeEvidence(journey, record) {
   if (!journey || !J.isReal(journey) || !record || !record.stages || !record.stages.research || !record.stages.research.output) return 0;
   let n = 0; const fresh = record.stages.research.output.sources || [];
@@ -365,6 +365,18 @@ export function mergeEvidence(journey, record) {
     const before = JSON.stringify(EVIDENCE_KEYS.map(k => s[k]));
     for (const k of EVIDENCE_KEYS) if (f[k] !== undefined) s[k] = clone(f[k]);
     if (JSON.stringify(EVIDENCE_KEYS.map(k => s[k])) !== before) n++;
+  }
+  const beforeResearch = JSON.stringify(journey.research || {});
+  journey.research ||= {};
+  for (const key of ['lineage', 'lineageChains', 'nodeCoverage']) {
+    if (record.stages.research.output[key] !== undefined) journey.research[key] = clone(record.stages.research.output[key]);
+  }
+  if (JSON.stringify(journey.research) !== beforeResearch) n++;
+  for (const key of ['provenanceIncomplete', 'derivedStateStale']) {
+    if (JSON.stringify(journey[key]) !== JSON.stringify(record[key])) {
+      if (record[key]) journey[key] = clone(record[key]); else delete journey[key];
+      n++;
+    }
   }
   return n;
 }

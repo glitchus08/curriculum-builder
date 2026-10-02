@@ -514,3 +514,25 @@ test('a decision already made is shown with what Claude had said', () => {
   assert.match(html, /A Person/); assert.match(html, /read the erratum/);
   assert.match(html, /Claude had said yes/, 'the model’s answer is not hidden by the decision');
 });
+
+test('refreshed evidence persists through serialization without overwriting personal checks or approved copies', () => {
+  const j = draft(), approved = structuredClone(j), e = record();
+  j.sources[0].personChecked = { at: 'person-check' };
+  e.stages.research.output = structuredClone(e.stages.research.output);
+  const source = e.stages.research.output.sources[0];
+  source.claimKey = 'claim-one'; source.attribution = { verdict: 'no', decisionHistory: [{ chosen: 'no' }] };
+  e.stages.research.output.nodeCoverage = [{ node: 'N1', status: 'unsupported' }];
+  e.derivedStateStale = { note: 'retry needed' };
+  assert.ok(R.mergeEvidence(j, e));
+  const reloaded = JSON.parse(JSON.stringify(j));
+  assert.equal(reloaded.sources[0].attribution.verdict, 'no');
+  assert.equal(reloaded.sources[0].attribution.decisionHistory.length, 1);
+  assert.deepEqual(reloaded.sources[0].personChecked, { at: 'person-check' });
+  assert.equal(reloaded.research.nodeCoverage[0].status, 'unsupported');
+  assert.ok(reloaded.derivedStateStale);
+  assert.equal(approved.sources[0].attribution, undefined);
+  delete e.derivedStateStale;
+  assert.ok(R.mergeEvidence(reloaded, e));
+  assert.equal(reloaded.derivedStateStale, undefined);
+  assert.equal(R.mergeEvidence(reloaded, e), 0);
+});

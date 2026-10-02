@@ -642,13 +642,19 @@ function render(dir = 'fwd', focus = true) {
   settle();
   const q = F.byId(S.at);
   const html = q ? viewQ(q) : ({ summary: viewSummary, generate: viewGenerate, outline: viewOutline, journey: viewJourney, session: viewSession, activity: viewActivity, checks: viewChecks, project: viewProject }[S.at])();
-  wrap(conflictHTML() + html, S.at === 'journey' ? 'wide' : ['outline', 'checks'].includes(S.at) ? 'mid' : ['session', 'activity', 'generate', 'summary', 'project'].includes(S.at) ? 'roomy' : '');
+  wrap(conflictHTML() + integrityHTML() + html, S.at === 'journey' ? 'wide' : ['outline', 'checks'].includes(S.at) ? 'mid' : ['session', 'activity', 'generate', 'summary', 'project'].includes(S.at) ? 'roomy' : '');
   roving(); save(); sync(); paintBrand();
   if (focus) { const h = $('#qt'); if (h) h.focus({ preventScroll: true }); window.scrollTo({ top: 0 }); }
 }
 // Redraw without moving the person: same scroll position, and focus back on the same control.
 function keepSel() { const a = document.activeElement; if (!a || !ui.contains(a)) return null; if (a.id) return '#' + CSS.escape(a.id); if (a.dataset && a.dataset.a) return `[data-a="${a.dataset.a}"]` + (a.dataset.v !== undefined ? `[data-v="${CSS.escape(a.dataset.v)}"]` : '') + (a.dataset.id ? `[data-id="${CSS.escape(a.dataset.id)}"]` : ''); return null; }
 function softRender(sel) { if (!sel) sel = keepSel(); const y = window.scrollY; render('none', false); window.scrollTo({ top: y }); if (sel) { const e = $(sel); if (e) e.focus({ preventScroll: true }); } }
+function integrityHTML() {
+  const state = engineOurs() ? E : S.journey;
+  if (!state) return '';
+  return (state.provenanceIncomplete ? '<p class="note" role="status"><span class="tag warn">Incomplete research record</span> Some saved requests or history could not be carried into this course. Restore a complete backup before treating its provenance as complete.</p>' : '')
+    + (state.derivedStateStale ? '<p class="note" role="alert"><span class="tag warn">Source views are out of date</span> Your decisions are saved, but their source views could not be refreshed. Reload to retry. Do not rely on the displayed support until this clears.</p>' : '');
+}
 function err(t, id = '#err') { const e = $(id) || $('#err') || $('#perr'); if (e) { e.textContent = t; if (t) e.scrollIntoView({ block: 'nearest' }); } if (t) say(t); }
 // When an answer is missing or wrong, say so beside the input and put the cursor there.
 function pointAt() { const c = $('#cin'), w = $('#cwrap'), t = (c && w && !w.hidden && c) || $('#tin') || $('#chin') || $('.pill[role][tabindex="0"]') || $('.pill[role]'); if (t) t.focus({ preventScroll: true }); }
@@ -656,13 +662,13 @@ const typing = () => { const a = document.activeElement; return !!S.editing || S
 
 /* ---------- the engine, watched from the page ---------- */
 function stopPoll() { clearTimeout(pollTimer); pollTimer = 0; }
-async function pollEngine() {
+async function pollEngine(strict = false) {
   stopPoll(); if (!booted || !course.id || recovery) return;
-  const id = course.id; let r; try { r = await api.engineGet(id); } catch (e) { if (E && E.status === 'running') pollTimer = setTimeout(pollEngine, 4000); return; }
+  const id = course.id; let r; try { r = await api.engineGet(id); } catch (e) { if (E && E.status === 'running') pollTimer = setTimeout(pollEngine, 4000); if (strict) throw new Error('The decision is recorded, but its refreshed view could not be loaded. Reload to try again.'); return; }
   if (id !== course.id) return;
-  const was = E ? JSON.stringify([E.status, E.savedAt, E.now && E.now.steps && E.now.steps.length]) : '';
+  const was = E ? JSON.stringify([E.status, E.savedAt, E.evidenceRevision, E.now && E.now.steps && E.now.steps.length]) : '';
   E = r.record; EBusy = r.busy;
-  if (JSON.stringify(E ? [E.status, E.savedAt, E.now && E.now.steps && E.now.steps.length] : '') !== was) onEngine();
+  if (JSON.stringify(E ? [E.status, E.savedAt, E.evidenceRevision, E.now && E.now.steps && E.now.steps.length] : '') !== was) onEngine();
   if (E && (E.status === 'running' || EBusy)) pollTimer = setTimeout(pollEngine, 1500);
 }
 function onEngine() {
@@ -958,14 +964,9 @@ document.addEventListener('click', async e => {
       sawEvidence: box.dataset.evidence, sawRevision: box.dataset.revision,
       replacing: box.dataset.replacing || undefined,
       chosen: b.dataset.chosen, becauseWords: because, reason: why, by: 'the person at this computer' });
-    // KNOWN GAP, deliberately not papered over: the journey keeps its own copy of each source and that copy
-    // is what this screen renders. The decision is recorded authoritatively in the course record and is served
-    // as `effectiveAttribution`, but this panel still shows the journey's older copy after a reload. Writing
-    // that copy back from here did not persist, so rather than ship a refresh that does not refresh, the
-    // decision is reported as recorded and the stale panel is named in the handoff.
-    say('Decision recorded. Nothing was asked of Claude. This panel may show the earlier answer until the '
-        + 'course is next rebuilt.');
-    await pollEngine();
+    await pollEngine(true);
+    if (!(await flushNow())) throw new Error('The decision is recorded, but this page could not save its refreshed view. Reload to read the saved decision.');
+    say('Decision recorded. The source and its history are updated. Nothing was asked of Claude.');
     softRender();
   } catch (e) {
     box.querySelectorAll('[data-chosen]').forEach(x => { x.disabled = false; });

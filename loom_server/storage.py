@@ -497,23 +497,28 @@ def save_request_snapshot(store, cid: str, fingerprint: str, payload: dict) -> s
     same request made by a hundred sources in one batch is one file, because it is one request.
     """
     body = json.dumps(payload, indent=1, ensure_ascii=False)
+    identity = request_identity(payload)
+    digest = hashlib.sha256(json.dumps(identity, sort_keys=True, ensure_ascii=False,
+                                      separators=(",", ":")).encode()).hexdigest()
     base = _fp_name(fingerprint)
     with LOCK:
-        for n in range(64):
-            # A fingerprint is a short hash, so two different requests can land on one name. Refusing the
-            # second and recording nothing lost the actual request that was sent — the one a replay would
-            # need. Both are kept now, under distinct names, and the run is told which one is ITS request.
-            name = f"{base}.json" if n == 0 else f"{base}-{n}.json"
+        # Keep existing references valid. A genuine collision gets a content-addressed name;
+        # execution receipts (including timestamps) do not turn a repeated ask into a new one.
+        for name in (base + ".json", base[:40] + "-" + digest + ".json"):
             path = provenance_file(store, cid, "requests", name, make=True)
             if path is None:
-                raise StoreError("Loom will not write that request into this course: the path is not a regular "
-                                 "file of its own.")
+                raise StoreError("Loom will not write a request through an unsafe path.")
             if not path.exists():
                 write_atomic(path, body)
                 return name
-            if path.read_text(encoding="utf-8") == body:
-                return name          # the very same request, already kept once
-        raise StoreError("Too many different requests share this fingerprint in this course.")
+            kept = read_json(path)
+            if isinstance(kept, dict) and request_identity(kept) == identity:
+                return name
+        raise StoreError("The saved request identity conflicts with its content address.")
+
+
+def request_identity(payload: dict) -> dict:
+    return {k: payload.get(k) for k in ("prompt", "system", "schema", "settings")}
 
 
 def read_request_snapshot(store, cid: str, fingerprint: str) -> dict | None:

@@ -3644,7 +3644,7 @@ class UnavailableHistoryIsNotNoHistory(unittest.TestCase):
             outside.write_text('{"runId":"not ours"}\n', encoding="utf-8")
             (d / name).symlink_to(outside)
         elif write is not None:
-            (d / name).write_text(write, encoding="utf-8")
+            (d / name).write_text("".join(json.dumps(dict(rs["attribution"][key], key=key, **json.loads(line))) + "\n" for line in write.splitlines()), encoding="utf-8")
         return f, cid, key
 
     def _run(self, cid, key):
@@ -3695,7 +3695,7 @@ class UnavailableHistoryIsNotNoHistory(unittest.TestCase):
         self.assertTrue(self._run(cid, key).get("historyIncomplete"))
         name = "k" + _h.sha256(str(key).encode()).hexdigest()[:24] + ".jsonl"
         (storage.course_dir("pipe", cid) / "attribution-history" / name).write_text(
-            '{"runId":"recovered"}\n', encoding="utf-8")
+            json.dumps(dict(engine.runner("pipe", cid).load()["stages"]["research"]["attribution"][key], key=key, runId="recovered")) + "\n", encoding="utf-8")
         r = engine.runner("pipe", cid).load()
         engine.runner("pipe", cid)._merge_research(r)
         self.assertIsNone(r["stages"]["research"]["output"]["sources"][0]["attribution"].get("historyIncomplete"))
