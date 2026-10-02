@@ -3839,3 +3839,151 @@ class AReopenedDecisionCanBeReplaced(unittest.TestCase):
         att = r["stages"]["research"]["output"]["sources"][0]["attribution"]
         self.assertTrue(att.get("decisionHistory"), "the panel can show every decision made")
         self.assertEqual(att["decisionHistory"][0]["chosen"], "yes")
+
+
+class EveryDeliveryModeReachesTheWriter(unittest.TestCase):
+    """The delivery rules exist in `prompts`; nothing proved they reach the person writing a session.
+
+    A rule that is written but never sent is the same as no rule: the writer plans for a room when the course
+    is self-paced, and nobody finds out until a learner is sitting alone with an instruction that assumes a
+    teacher is standing there.
+    """
+
+    OUTLINE = {"sessions": [{"title": "One", "aim": "a", "minutes": 60, "topics": ["N1"], "proof": "p"}]}
+
+    def _prompt(self, delivery, fmt="course", minutes=60):
+        from loom_server import prompts
+        brief = {"topics": ["t"], "outcome": "o", "deliveryKey": delivery, "formatKey": fmt,
+                 "audience": "adults", "priorKey": "some"}
+        plan = {"sessions": 1, "minutes": [minutes], "unit": "session"}
+        p, _ = prompts.materials(brief, plan, None, self.OUTLINE, 0)
+        return p
+
+    def test_each_mode_sends_its_own_rule_and_not_another(self):
+        marks = {"room": "IN A ROOM", "live": "ONLINE AND LIVE", "hybrid": "ROOM AND ONLINE TOGETHER",
+                 "self": "SELF-PACED", "blended": "BLENDED"}
+        for mode, mark in marks.items():
+            p = self._prompt(mode)
+            self.assertIn(mark, p, f"{mode} must carry its own rule")
+            for other, other_mark in marks.items():
+                if other != mode and other_mark not in mark and mark not in other_mark:
+                    self.assertNotIn(other_mark, p, f"{mode} must not also carry the {other} rule")
+
+    def test_self_paced_tells_the_writer_there_is_no_teacher(self):
+        p = self._prompt("self")
+        self.assertIn("no teacher present", p)
+        self.assertIn("check one", p, "a self-paced learner needs a way to check their own work")
+
+    def test_hybrid_demands_two_routes_and_says_who_watches_the_online_group(self):
+        p = self._prompt("hybrid")
+        self.assertIn("two written routes", p)
+        self.assertIn("who watches the online group", p)
+
+    def test_live_online_plans_for_a_weak_connection(self):
+        self.assertIn("weak connection", self._prompt("live"))
+
+    def test_blended_must_say_which_work_is_live_and_use_the_rest(self):
+        p = self._prompt("blended")
+        self.assertIn("whether it is live or done alone", p)
+        self.assertIn("used in the next live session", p)
+
+    def test_a_mode_loom_does_not_know_adds_no_rule_rather_than_a_wrong_one(self):
+        p = self._prompt("teleportation")
+        for mark in ("IN A ROOM", "SELF-PACED", "BLENDED", "ROOM AND ONLINE TOGETHER", "ONLINE AND LIVE"):
+            self.assertNotIn(mark, p)
+
+
+class ShortFormatsAreNotTreatedAsCourses(unittest.TestCase):
+    """A talk is not a workshop with less time, and a clinic is not a course with a different label."""
+
+    OUTLINE = {"sessions": [{"title": "One", "aim": "a", "minutes": 20, "topics": ["N1"], "proof": "p"}]}
+
+    def _prompt(self, fmt, minutes):
+        from loom_server import prompts
+        brief = {"topics": ["t"], "outcome": "o", "deliveryKey": "room", "formatKey": fmt,
+                 "audience": "adults", "priorKey": "some"}
+        return prompts.materials(brief, {"sessions": 1, "minutes": [minutes], "unit": "session"}, None,
+                                 {"sessions": [dict(self.OUTLINE["sessions"][0], minutes=minutes)]}, 0)[0]
+
+    def test_a_talk_is_told_not_to_become_a_workshop(self):
+        p = self._prompt("talk", 20)
+        self.assertIn("Do not force a workshop into it", p)
+        self.assertIn("Two activities are enough", p)
+
+    def test_a_talk_is_not_failed_for_having_no_feedback_activity(self):
+        self.assertIn("will not send the answer back for", self._prompt("talk", 20))
+
+    def test_a_short_session_of_any_format_is_told_not_to_pad(self):
+        self.assertIn("Do not pad it", self._prompt("course", 40))
+
+    def test_a_clinic_is_built_around_what_learners_bring(self):
+        p = self._prompt("clinic", 60)
+        self.assertIn("CLINIC", p)
+        self.assertIn("brings nothing", p, "the teacher needs a plan for the learner who brings nothing")
+
+    def test_a_long_course_session_gets_no_short_format_rule(self):
+        p = self._prompt("course", 90)
+        for mark in ("Do not force a workshop into it", "Do not pad it", "CLINIC"):
+            self.assertNotIn(mark, p)
+
+
+class PrerequisiteRecursionStops(unittest.TestCase):
+    """A map that keeps asking "and what does THAT need?" never finishes. Where it stops must be visible."""
+
+    def test_the_map_records_where_it_stopped_and_what_it_assumed(self):
+        f, cid, rec = begin("map-stop")
+        m = rec["stages"]["map"]["output"]
+        self.assertIn("assumed_entry", m, "what learners are assumed to know already is part of the answer")
+        self.assertIn("stop_reason", m, "and so is why the map goes no deeper")
+
+    def test_every_foundation_names_what_it_is_needed_by(self):
+        f, cid, rec = begin("map-why")
+        for n in rec["stages"]["map"]["output"]["nodes"]:
+            if n.get("kind") == "foundation":
+                self.assertTrue(n.get("needed_by"), f"{n['id']} must say what it is a foundation for")
+                self.assertTrue(str(n.get("why_needed") or "").strip(), f"{n['id']} must say why")
+
+    def test_a_requirement_the_map_does_not_hold_is_an_open_gap_not_a_silent_one(self):
+        from loom_server import pipeline
+        m = {"nodes": [{"id": "N1", "name": "Later", "role": "required", "kind": "requested",
+                        "requires": ["N-MISSING"], "needed_by": ["OUTCOME"], "est_minutes": 30}],
+             "assumed_entry": [], "stop_reason": "x"}
+        got = pipeline.derive_map(dict(m))["derived"]
+        self.assertIn("order", got, "the map still orders what it does hold")
+        self.assertNotIn("N-MISSING", got["order"], "a requirement with no node is not invented as one")
+        self.assertTrue(got.get("openGaps") or got.get("unresolved") or
+                        any("N-MISSING" in str(v) for v in got.values()),
+                        "and it is named somewhere rather than dropped in silence")
+
+
+class ACombinationMustEarnItsPlace(unittest.TestCase):
+    """Two topics in one brief is a claim that they belong together. The claim has to be made and checked."""
+
+    def test_the_outline_is_asked_what_each_topic_contributes(self):
+        from loom_server import prompts
+        brief = {"topics": ["data cleaning", "environmental storytelling"], "outcome": "o",
+                 "deliveryKey": "room", "formatKey": "course", "audience": "adults", "priorKey": "some",
+                 "mode": "combined"}
+        m = {"nodes": [{"id": "N1", "name": "data cleaning", "role": "required", "kind": "requested"},
+                       {"id": "N2", "name": "environmental storytelling", "role": "required", "kind": "requested"}],
+             "assumed_entry": [], "stop_reason": "x"}
+        p, _ = prompts.outline2(brief, {"sessions": 4, "minutes": [90] * 4, "unit": "session", "total": 360}, m, None,
+                                {"note": "", "minor": 1, "major": 1}, {"statement": ""}, [])
+        low = p.lower()
+        self.assertTrue("combin" in low or "together" in low or "integrat" in low,
+                        "a combined brief must ask how the topics work together")
+
+    def test_the_research_schema_records_whether_the_combination_is_supported(self):
+        from loom_server import prompts
+        self.assertIn("combination_evidence", json.dumps(prompts.RESEARCH_SCHEMA))
+        enum = json.dumps(prompts.RESEARCH_SCHEMA)
+        for v in ("supported", "weak", "none_found", "not_applicable"):
+            self.assertIn(v, enum, f"{v} is one of the honest answers about a combination")
+
+    def test_coverage_says_where_each_requested_topic_is_actually_taught(self):
+        f, cid, rec = begin("combination-coverage")
+        rows = (rec["stages"].get("outline") or {}).get("coverage", {}).get("rows")
+        if not rows:
+            self.skipTest("this fixture stops before an outline; coverage is tested in the outline tests")
+        for r in rows:
+            self.assertIn("taughtInSession", r, f"{r.get('name')} must say where it is taught")

@@ -89,6 +89,16 @@ def derive_map(m: dict) -> dict:
                       "requiredMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "required"),
                       "optionalMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "optional"),
                       "openGaps": gaps, "unresolved": [g for g in (m.get("unresolved") or []) if _txt(g)]}
+    # A topic that says it needs something the map does not hold. The ordering simply skipped these, so a
+    # prerequisite the map itself named went nowhere and nothing said so — the quiet dropping the map exists
+    # to prevent. Named here, so it is visible beside the gaps rather than inferred from an empty space.
+    dangling = [{"node": n["id"], "name": n.get("name"), "needs": r}
+                for n in nodes for r in (n.get("requires") or []) if r not in by]
+    if dangling:
+        out["derived"]["danglingRequirements"] = dangling
+        out["derived"]["unresolved"] = out["derived"]["unresolved"] + [
+            f"{d['name'] or d['node']} says it needs {d['needs']}, which is not a topic in this map"
+            for d in dangling]
     return out
 
 
