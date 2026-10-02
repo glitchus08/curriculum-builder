@@ -4005,3 +4005,110 @@ class AnEditOnARecordWithoutAnEditsTableIsNotACrash(unittest.TestCase):
         got = engine.runner("pipe", cid).load()
         self.assertIn("edits", got, "the same empty table begin would have made")
         self.assertIn("edit0001", got["edits"])
+
+
+class AnImpossibleOrderIsCaughtBeforeTheWriterIsAsked(unittest.TestCase):
+    """A real run paused here: the map said a topic needed its own later stages.
+
+    The validator was right to refuse; the fault was upstream. Kahn's algorithm ordered what it could and the
+    leftovers — the nodes caught in a `requires` cycle — were appended to `order` as though they had been
+    sorted, so nothing downstream could tell that no session order could ever satisfy the map. The run reached
+    the outline writer, failed the ordering check, was corrected once, failed again and paused.
+    """
+
+    def _cycle(self):
+        return {"nodes": [
+            {"id": "N1", "name": "design thinking", "role": "required", "kind": "requested",
+             "requires": ["N2"], "needed_by": ["OUTCOME"], "est_minutes": 30},
+            {"id": "N2", "name": "rebuilding an answer", "role": "required", "kind": "subtopic",
+             "requires": ["N1"], "needed_by": ["N1"], "est_minutes": 30}]}
+
+    def test_a_requires_cycle_is_named_rather_than_ordered_away(self):
+        from loom_server import pipeline
+        d = pipeline.derive_map(self._cycle())["derived"]
+        got = d.get("orderingImpossible")
+        self.assertTrue(got, "two topics that need each other cannot be put in an order")
+        self.assertEqual({n["id"] for n in got["nodes"]}, {"N1", "N2"})
+        self.assertTrue(any(e["name"] == "design thinking" and e["needsName"] == "rebuilding an answer"
+                            for e in got["edges"]), got["edges"])
+        self.assertIn("problem with the map", got["note"])
+
+    def test_a_map_that_can_be_ordered_raises_nothing(self):
+        from loom_server import pipeline
+        ok = {"nodes": [
+            {"id": "N1", "name": "Reading a CSV", "role": "required", "kind": "requested",
+             "requires": [], "needed_by": ["N2"], "est_minutes": 30},
+            {"id": "N2", "name": "One honest chart", "role": "required", "kind": "requested",
+             "requires": ["N1"], "needed_by": ["OUTCOME"], "est_minutes": 30}]}
+        d = pipeline.derive_map(ok)["derived"]
+        self.assertIsNone(d.get("orderingImpossible"))
+        self.assertEqual(d["order"], ["N1", "N2"], "and it is still ordered prerequisite first")
+
+    def test_the_ordering_check_itself_is_unchanged(self):
+        """The fix is upstream. A genuine out-of-order outline must still be refused."""
+        from loom_server import pipeline
+        m = pipeline.derive_map({"nodes": [
+            {"id": "N1", "name": "Later", "role": "required", "kind": "requested",
+             "requires": ["N2"], "needed_by": ["OUTCOME"], "est_minutes": 30},
+            {"id": "N2", "name": "Earlier", "role": "required", "kind": "foundation",
+             "requires": [], "needed_by": ["N1"], "est_minutes": 30}]})
+        # "Later" is taught in session 1, the foundation it needs in session 2: exactly the wrong way round.
+        out = {"sessions": [{"title": "One", "aim": "a", "minutes": 60, "teaches": ["N1"], "proof": "p"},
+                            {"title": "Two", "aim": "b", "minutes": 60, "teaches": ["N2"], "proof": "p"}],
+               "projects": [], "deferred": [], "trimmed": []}
+        problems = pipeline.check_outline_v2(out, m, {"topics": ["t"], "outcome": "o"},
+                                             {"sessions": 2, "minutes": [60, 60], "unit": "session", "total": 120})
+        self.assertTrue(any("before what it needs" in t for t in problems),
+                        f"the ordering check must still refuse a genuinely out-of-order outline: {problems}")
+
+
+class TheOrderingVerdictIsNotDiscarded(unittest.TestCase):
+    """The foundations reviewer is asked for 'any requires line that runs the wrong way'. Nothing read it."""
+
+    def test_what_the_reviewer_said_about_order_is_kept_on_the_map(self):
+        f, cid, rec = begin("ordering-verdict")
+        r = engine.runner("pipe", cid).load()
+        fr = r["stages"]["foundation_review"]
+        fr["output"] = dict(fr.get("output") or {}, ordering_problems=[
+            "“design thinking” lists “rebuilding an answer” under requires; that line runs the wrong way."])
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid)._apply_foundation_additions(r)
+        self.assertTrue(r["stages"]["map"].get("orderingProblems"),
+                        "the reviewer's ordering verdict must survive, not only be rendered")
+        self.assertIn("runs the wrong way", r["stages"]["map"]["orderingProblems"][0])
+
+    def test_it_clears_when_the_reviewer_reports_none(self):
+        f, cid, rec = begin("ordering-clear")
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["map"]["orderingProblems"] = ["something old"]
+        fr = r["stages"]["foundation_review"]
+        fr["output"] = dict(fr.get("output") or {}, ordering_problems=[])
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid)._apply_foundation_additions(r)
+        self.assertIsNone(r["stages"]["map"].get("orderingProblems"))
+
+    def test_the_outline_writer_is_told_which_lines_are_disputed(self):
+        from loom_server import prompts, pipeline
+        m = pipeline.derive_map({"nodes": [
+            {"id": "N1", "name": "design thinking", "role": "required", "kind": "requested",
+             "requires": ["N2"], "needed_by": ["OUTCOME"], "est_minutes": 30},
+            {"id": "N2", "name": "rebuilding an answer", "role": "required", "kind": "subtopic",
+             "requires": ["N1"], "needed_by": ["N1"], "est_minutes": 30}]})
+        m["orderingProblems"] = ["“design thinking” lists “rebuilding an answer” under requires; wrong way."]
+        p, _ = prompts.outline2({"topics": ["t"], "outcome": "o", "deliveryKey": "room", "formatKey": "course"},
+                                {"sessions": 4, "minutes": [90] * 4, "unit": "session", "total": 360}, m, None,
+                                {"note": "", "minor": 1, "major": 1}, {"statement": ""}, [])
+        self.assertIn("ORDER OF TOPICS", p)
+        self.assertIn("wrong way", p)
+        self.assertIn("need EACH OTHER", p, "and a provable impossibility is named as such")
+        self.assertIn("do not contort the course", p, "the writer is told not to satisfy a doubtful line")
+
+    def test_a_clean_map_adds_no_warning_to_the_prompt(self):
+        from loom_server import prompts, pipeline
+        m = pipeline.derive_map({"nodes": [
+            {"id": "N1", "name": "Reading a CSV", "role": "required", "kind": "requested",
+             "requires": [], "needed_by": ["OUTCOME"], "est_minutes": 30}]})
+        p, _ = prompts.outline2({"topics": ["t"], "outcome": "o", "deliveryKey": "room", "formatKey": "course"},
+                                {"sessions": 2, "minutes": [90] * 2, "unit": "session", "total": 180}, m, None,
+                                {"note": "", "minor": 1, "major": 1}, {"statement": ""}, [])
+        self.assertNotIn("ORDER OF TOPICS", p)

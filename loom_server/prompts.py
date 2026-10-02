@@ -862,6 +862,28 @@ def source_review(brief: dict, m: dict, sources: list, findings: list, final_rou
     return p, SOURCE_REVIEW_SCHEMA
 
 
+def ordering_warning(m: dict) -> str:
+    """What a separate reviewer said about this map's order, and anything provably impossible in it.
+
+    A writer told only "teach each topic before what needs it" cannot act on a `requires` line that runs the
+    wrong way: it will place the topic sensibly, fail the ordering check, and the run will pause. Saying which
+    lines are disputed is what lets it place them and name the problem instead.
+    """
+    said = [t for t in (m.get("orderingProblems") or []) if str(t or "").strip()]
+    stuck = ((m.get("derived") or {}).get("orderingImpossible") or {})
+    if not said and not stuck:
+        return ""
+    out = ["ORDER OF TOPICS — A SEPARATE REVIEWER'S FINDINGS. Treat these 'requires' lines as doubtful rather "
+           "than as fact. Where a line runs the wrong way, teach the topic where it belongs and say so in "
+           "'ordering_notes'; do not contort the course to satisfy a line the reviewer has questioned."]
+    out += [f"- {t}" for t in said[:12]]
+    if stuck.get("edges"):
+        out.append("- These topics need EACH OTHER, so no order can satisfy them all: "
+                   + "; ".join(f"“{e.get('name')}” needs “{e.get('needsName')}”" for e in stuck["edges"][:8])
+                   + ". One of those lines is wrong. Place them in the order that teaches best and name it.")
+    return "\n".join(out)
+
+
 def outline2(brief: dict, plan: dict, m: dict, research_out: dict | None, policy: dict, accounting: dict, gaps: list, feedback: str | None = None, previous: dict | None = None, prepared: list | None = None) -> tuple[str, dict]:
     base, _ = outline(brief, plan, research_out, feedback, previous)
     head, rest = base.split("HOW TO DESIGN IT", 1)
@@ -874,6 +896,7 @@ def outline2(brief: dict, plan: dict, m: dict, research_out: dict | None, policy
     extra = "\n\n".join([
         block("topic_map", {"nodes": map_digest(m), "outcome_needs": (m or {}).get("outcome_needs"), "open_gaps": gaps}),
         block("time", time_facts(plan, policy, accounting)),
+        ordering_warning(m),
         ("USING THE EVIDENCE. The sources block above carries each source's identity, how strongly it stands and what each "
          "separate review concluded. Use it when you decide what can be claimed and what a session can rest on. A topic whose "
          "only support is a tool-made summary is not settled: say so under 'assumptions' rather than designing as though it "

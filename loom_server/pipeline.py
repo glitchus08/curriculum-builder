@@ -84,14 +84,34 @@ def derive_map(m: dict) -> dict:
     # A topic whose own prerequisites are in the map is not a gap: those prerequisites are what get it started.
     gaps = [f"“{n.get('name')}” is needed, but nothing in the map leads up to it and a learner at the stated starting level cannot begin it: {_txt(n.get('below_entry')) or 'nothing was said about what lies below it'}."
             for n in live if n.get("entry_reached") is False and not [r for r in n["requires"] if r in by]]
+    # Kahn's algorithm orders everything it can. Whatever is left over is in a `requires` cycle: A needs B and
+    # B needs A, directly or round a longer loop. No session order can satisfy that, so an outline built from it
+    # is certain to fail the ordering check — which is exactly how a run gets to the writer, fails twice and
+    # pauses. Appending the leftovers to `order` as though they had been sorted hid it completely.
+    stuck = [n["id"] for n in nodes if n["id"] not in order]
     out = dict(m, nodes=nodes)
-    out["derived"] = {"order": order + [n["id"] for n in nodes if n["id"] not in order], "levels": level,
+    out["derived"] = {"order": order + stuck, "levels": level,
                       "requiredMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "required"),
                       "optionalMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "optional"),
                       "openGaps": gaps, "unresolved": [g for g in (m.get("unresolved") or []) if _txt(g)]}
     # A topic that says it needs something the map does not hold. The ordering simply skipped these, so a
     # prerequisite the map itself named went nowhere and nothing said so — the quiet dropping the map exists
     # to prevent. Named here, so it is visible beside the gaps rather than inferred from an empty space.
+    if stuck:
+        loops = []
+        for i in stuck:
+            n = by[i]
+            for r in n["requires"]:
+                if r in stuck:
+                    loops.append({"node": i, "name": n.get("name"), "needs": r,
+                                  "needsName": (by.get(r) or {}).get("name")})
+        out["derived"]["orderingImpossible"] = {
+            "nodes": [{"id": i, "name": (by.get(i) or {}).get("name")} for i in stuck],
+            "edges": loops,
+            "note": ("These topics need each other, directly or round a loop, so no order of sessions can teach "
+                     "each one before the topic that needs it. This is a problem with the map, not with the "
+                     "outline: one of these 'requires' lines runs the wrong way and has to be corrected before "
+                     "an outline can be written.")}
     dangling = [{"node": n["id"], "name": n.get("name"), "needs": r}
                 for n in nodes for r in (n.get("requires") or []) if r not in by]
     if dangling:

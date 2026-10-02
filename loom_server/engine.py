@@ -1453,6 +1453,15 @@ class Runner:
             elif names:
                 st["rejectedAdditions"] = names
                 st["rejectedBecause"] = bad[:4]
+        # The reviewer is asked for "any 'requires' line that runs the wrong way" under `ordering_problems`, and
+        # until now only `missing_foundations` was ever read: its ordering verdict was rendered on screen and
+        # otherwise dropped. It is kept on the map here so the outline writer is told, and so a person can see
+        # which lines are disputed rather than meeting them as a failure at the end of a long run.
+        said = [t for t in (st.get("output") or {}).get("ordering_problems") or [] if _txt(t)]
+        if said:
+            mp["orderingProblems"] = said[:12]
+        else:
+            mp.pop("orderingProblems", None)
         st["appliedToFingerprint"] = mp.get("fingerprint")
 
     def _research_batch(self, rec: dict, b: dict, cache: dict, valid: set, label: str, extra_questions: list | None = None) -> None:
