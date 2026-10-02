@@ -60,6 +60,32 @@ def derive_map(m: dict) -> dict:
     for n in nodes:
         n["needed_by"] = list(dict.fromkeys(x for x in n.get("needed_by") or [] if isinstance(x, str)))
         n["requires"] = [r for r in dict.fromkeys(n.get("requires") or []) if isinstance(r, str)]
+        # What the model itself said, kept once and never written over. Every correction below is applied on
+        # top of this, so the original record of what was claimed survives any number of corrections.
+        if "requiresAsGiven" not in n:
+            n["requiresAsGiven"] = list(n["requires"])
+    # A person's corrections to individual `requires` lines. A line that means "is part of this topic" or "is
+    # taught later as an application of it" is not a prerequisite, and leaving it in the map makes an outline
+    # that teaches well fail the ordering check — which is a wrong answer from a correct check. Corrections are
+    # applied HERE, so everything downstream, the ordering check included, reads one corrected map. Nothing
+    # tells the check to look the other way.
+    applied, moot = [], []
+    for c in (m.get("edgeCorrections") or []):
+        if not isinstance(c, dict):
+            continue
+        n, r = by.get(c.get("node")), c.get("removes")
+        if n is None or not isinstance(r, str):
+            moot.append(dict(c, why_not="that topic is not in this map"))
+        elif r not in (n.get("requiresAsGiven") or []):
+            # The map has been regenerated and no longer claims this line. A correction to something nobody
+            # claims any more is not quietly kept: it is reported as no longer applying.
+            moot.append(dict(c, why_not="this map no longer says that topic needs it"))
+        else:
+            if r in n["requires"]:
+                n["requires"].remove(r)
+            if c.get("node") in (by.get(r, {}).get("needed_by") or []):
+                by[r]["needed_by"].remove(c["node"])
+            applied.append(c)
     for n in nodes:
         for r in n["requires"]:
             if r in by and n["id"] not in by[r]["needed_by"]:
@@ -91,6 +117,7 @@ def derive_map(m: dict) -> dict:
     stuck = [n["id"] for n in nodes if n["id"] not in order]
     out = dict(m, nodes=nodes)
     out["derived"] = {"order": order + stuck, "levels": level,
+                      "edgeCorrections": {"applied": applied, "noLongerApplies": moot} if (applied or moot) else None,
                       "requiredMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "required"),
                       "optionalMinutes": sum(int(n.get("est_minutes") or 0) for n in nodes if n.get("role") == "optional"),
                       "openGaps": gaps, "unresolved": [g for g in (m.get("unresolved") or []) if _txt(g)]}

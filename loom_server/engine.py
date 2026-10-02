@@ -810,6 +810,66 @@ def effective_attribution(rs: dict, claim_key: str, store=None, cid: str | None 
     return av
 
 
+EDGE_CORRECTION_KINDS = ("contained_in", "later_application")
+
+
+def record_edge_correction(store, cid: str, node: str, removes: str, correction: dict) -> dict:
+    """Record that one `requires` line is not a prerequisite. No model is asked anything.
+
+    Two kinds, and only two. `contained_in`: the named topic is a part or a stage of the topic that lists it,
+    so it is taught within it rather than before it. `later_application`: it is taught afterwards, applying
+    what this topic teaches. Anything else is a real prerequisite and must be fixed by moving sessions, not by
+    deleting the line — so this refuses to be the tool for that.
+
+    The map's own claim is never overwritten: `requiresAsGiven` keeps it, the correction sits beside it, and
+    both travel with the course. A correction stops applying by itself if a regenerated map no longer makes
+    the claim it corrects.
+    """
+    want = {k: str(correction.get(k) or "").strip() for k in ("by", "why")}
+    kind = str(correction.get("kind") or "").strip()
+
+    def change(rec):
+        if rec.get("status") == "running":
+            raise storage.Conflict("Loom is working on this course. The map is not changed while a job is "
+                                   "running, so a correction cannot be overwritten by what it saves.", None)
+        mp = ((rec.get("stages") or {}).get("map") or {})
+        out = mp.get("output")
+        if not isinstance(out, dict) or not isinstance(out.get("nodes"), list):
+            raise storage.StoreError("This course has no topic map to correct.")
+        by = {n.get("id"): n for n in out["nodes"] if isinstance(n, dict)}
+        if node not in by:
+            raise storage.StoreError(f"{node} is not a topic in this map.")
+        if removes not in (by[node].get("requiresAsGiven") or by[node].get("requires") or []):
+            raise storage.StoreError(f"This map does not say {node} needs {removes}.")
+        if kind not in EDGE_CORRECTION_KINDS:
+            raise storage.StoreError("Say which this is: 'contained_in' (a part or stage of the topic) or "
+                                     "'later_application' (taught afterwards, applying it). A line that is "
+                                     "neither is a real prerequisite: move the sessions instead.")
+        if not all(want.values()):
+            raise storage.StoreError("A correction needs who made it and why that line is not a prerequisite.")
+        held = [c for c in (out.get("edgeCorrections") or [])
+                if isinstance(c, dict) and c.get("node") == node and c.get("removes") == removes]
+        if held:
+            raise storage.Conflict("That line has already been corrected.", held[0].get("at"))
+        made = dict(want, kind=kind, node=node, removes=removes, at=storage.now_iso(),
+                    correctionId=secrets.token_hex(8),
+                    nodeName=by[node].get("name"), removesName=(by.get(removes) or {}).get("name"),
+                    mapFingerprintWhenMade=mp.get("fingerprint"))
+        out.setdefault("edgeCorrections", []).append(made)
+        # Everything derived from the map is worked out again from the corrected map, so the ordering check,
+        # the coverage and the outline request all read the same thing.
+        mp["output"] = pipeline.derive_map(out)
+        mp["fingerprint"] = content_print(mp["output"]["nodes"])
+        rec.setdefault("mapHistory", []).append(
+            {"at": made["at"], "what": "a requires line was corrected", "by": made["by"],
+             "node": node, "nodeName": made["nodeName"], "removed": removes,
+             "removedName": made["removesName"], "kind": kind, "why": made["why"],
+             "mapFingerprintBefore": made["mapFingerprintWhenMade"], "mapFingerprintAfter": mp["fingerprint"]})
+        return made
+
+    return storage.update_engine(store, cid, change)
+
+
 def record_resolution(store, cid: str, claim_key: str, dkey: str, decision: dict) -> dict:
     """Write one person's decision about one disagreement. No model is asked anything.
 

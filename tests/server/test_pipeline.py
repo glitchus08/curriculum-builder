@@ -4112,3 +4112,136 @@ class TheOrderingVerdictIsNotDiscarded(unittest.TestCase):
                                 {"sessions": 2, "minutes": [90] * 2, "unit": "session", "total": 180}, m, None,
                                 {"note": "", "minor": 1, "major": 1}, {"statement": ""}, [])
         self.assertNotIn("ORDER OF TOPICS", p)
+
+
+class ARequiresLineCanBeCorrectedWithoutTouchingTheCheck(unittest.TestCase):
+    """The paused run's six edges, and the only honest way to clear them.
+
+    Telling the outline writer that a line is doubtful does nothing: `check_outline_v2` validates against
+    `map.output.nodes[*].requires`, so the line still fails. The map itself has to be corrected, the original
+    claim has to survive, and the check must stay exactly as strict as it was.
+
+    The map below reconstructs the six edges from the real failure. It is a reconstruction, not the saved map.
+    """
+
+    UMBRELLA = "design thinking, first principle thinking, principle of programming languages, data science"
+
+    def _nodes(self):
+        return [
+            {"id": "N1", "name": self.UMBRELLA, "role": "required", "kind": "requested", "est_minutes": 60,
+             "requires": ["N7", "N8"], "needed_by": ["OUTCOME"]},
+            {"id": "N2", "name": "design thinking", "role": "required", "kind": "requested", "est_minutes": 60,
+             "requires": ["N4", "N5", "N6"], "needed_by": ["OUTCOME"]},
+            {"id": "N3", "name": "first principle thinking", "role": "required", "kind": "requested",
+             "est_minutes": 60, "requires": ["N6"], "needed_by": ["OUTCOME"]},
+            {"id": "N4", "name": "making and choosing options", "role": "required", "kind": "subtopic",
+             "est_minutes": 45, "requires": [], "needed_by": ["N2"]},
+            {"id": "N5", "name": "rough prototypes and tests", "role": "required", "kind": "subtopic",
+             "est_minutes": 45, "requires": [], "needed_by": ["N2"]},
+            {"id": "N6", "name": "rebuilding an answer", "role": "required", "kind": "subtopic",
+             "est_minutes": 45, "requires": [], "needed_by": ["N2", "N3"]},
+            {"id": "N7", "name": "choosing and combining the methods", "role": "required", "kind": "subtopic",
+             "est_minutes": 45, "requires": [], "needed_by": ["N1"]},
+            {"id": "N8", "name": "A full pass on an unseen problem, with feedback", "role": "required",
+             "kind": "subtopic", "est_minutes": 60, "requires": [], "needed_by": ["N1"]}]
+
+    OUTLINE = {"sessions": [
+        {"title": "S1", "aim": "a", "minutes": 90, "teaches": ["N1", "N2", "N3"], "proof": "p"},
+        {"title": "S2", "aim": "b", "minutes": 90, "teaches": ["N4", "N5", "N6"], "proof": "p"},
+        {"title": "S3", "aim": "c", "minutes": 90, "teaches": [], "proof": "p"},
+        {"title": "S4", "aim": "d", "minutes": 90, "teaches": ["N7", "N8"], "proof": "p"}],
+        "projects": [], "deferred": [], "trimmed": []}
+    BRIEF = {"topics": ["design thinking"], "outcome": "o"}
+    PLAN = {"sessions": 4, "minutes": [90] * 4, "unit": "session", "total": 360}
+    CORRECTIONS = [("N2", "N4", "contained_in"), ("N2", "N5", "contained_in"), ("N2", "N6", "contained_in"),
+                   ("N3", "N6", "later_application"), ("N1", "N7", "later_application"),
+                   ("N1", "N8", "later_application")]
+
+    def _ordering(self, m):
+        from loom_server import pipeline
+        return [t for t in pipeline.check_outline_v2(self.OUTLINE, m, self.BRIEF, self.PLAN)
+                if "before what it needs" in t]
+
+    def _corrected(self):
+        f, cid, rec = begin("edge-correction")
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["map"]["output"] = {"nodes": self._nodes()}
+        r["stages"]["map"]["fingerprint"] = "fp0"
+        r["status"] = "paused"
+        engine.runner("pipe", cid).save(r)
+        for node, removes, kind in self.CORRECTIONS:
+            engine.record_edge_correction("pipe", cid, node, removes,
+                                          {"kind": kind, "why": "a stage or a later application, not a "
+                                                                "prerequisite", "by": "the owner"})
+        return cid, engine.runner("pipe", cid).load()["stages"]["map"]["output"]
+
+    def test_the_six_edges_fail_the_check_before_they_are_corrected(self):
+        from loom_server import pipeline
+        got = self._ordering(pipeline.derive_map({"nodes": self._nodes()}))
+        self.assertEqual(len(got), 6, got)
+        self.assertTrue(any("“making and choosing options”" in t for t in got))
+        self.assertTrue(any("“A full pass on an unseen problem, with feedback”" in t for t in got))
+
+    def test_after_correcting_them_the_check_reports_none(self):
+        cid, m = self._corrected()
+        self.assertEqual(self._ordering(m), [], "the same check, on a corrected map")
+
+    def test_the_map_still_records_every_line_the_model_claimed(self):
+        cid, m = self._corrected()
+        by = {n["id"]: n for n in m["nodes"]}
+        self.assertEqual(by["N2"]["requiresAsGiven"], ["N4", "N5", "N6"], "the model's claim is not erased")
+        self.assertEqual(by["N2"]["requires"], [], "only the effective list changes")
+        self.assertEqual(len(m["derived"]["edgeCorrections"]["applied"]), 6)
+
+    def test_the_corrections_are_kept_in_the_course_history(self):
+        cid, m = self._corrected()
+        hist = engine.runner("pipe", cid).load()["mapHistory"]
+        self.assertEqual(len(hist), 6)
+        self.assertEqual(hist[0]["removedName"], "making and choosing options")
+        self.assertTrue(hist[0]["mapFingerprintBefore"] and hist[0]["mapFingerprintAfter"])
+        self.assertNotEqual(hist[0]["mapFingerprintBefore"], hist[0]["mapFingerprintAfter"])
+
+    def test_a_real_prerequisite_cannot_be_deleted_this_way(self):
+        cid, _ = self._corrected()
+        r = engine.runner("pipe", cid).load()
+        r["stages"]["map"]["output"]["nodes"][0]["requiresAsGiven"] = ["N7", "N8", "N4"]
+        engine.runner("pipe", cid).save(r)
+        with self.assertRaises(storage.StoreError):
+            engine.record_edge_correction("pipe", cid, "N1", "N4",
+                                          {"kind": "prerequisite", "why": "it just is", "by": "someone"})
+
+    def test_a_line_the_map_does_not_claim_cannot_be_corrected(self):
+        cid, _ = self._corrected()
+        with self.assertRaises(storage.StoreError):
+            engine.record_edge_correction("pipe", cid, "N4", "N8",
+                                          {"kind": "contained_in", "why": "x", "by": "y"})
+
+    def test_the_same_line_is_not_corrected_twice(self):
+        cid, _ = self._corrected()
+        with self.assertRaises(storage.Conflict):
+            engine.record_edge_correction("pipe", cid, "N2", "N4",
+                                          {"kind": "contained_in", "why": "again", "by": "y"})
+
+    def test_a_correction_stops_applying_when_the_map_no_longer_claims_the_line(self):
+        from loom_server import pipeline
+        m = {"nodes": [dict(n, requires=[], requiresAsGiven=[]) for n in self._nodes()],
+             "edgeCorrections": [{"node": "N2", "removes": "N4", "kind": "contained_in", "why": "x",
+                                  "by": "y", "at": "2026-10-02T00:00:00Z"}]}
+        got = pipeline.derive_map(m)["derived"]["edgeCorrections"]
+        self.assertEqual(got["applied"], [])
+        self.assertIn("no longer says", got["noLongerApplies"][0]["why_not"])
+
+    def test_the_ordering_check_is_untouched_by_all_of_this(self):
+        """A genuine out-of-order outline, on a map with no corrections, is still refused."""
+        from loom_server import pipeline
+        m = pipeline.derive_map({"nodes": [
+            {"id": "A", "name": "Later", "role": "required", "kind": "requested", "requires": ["B"],
+             "needed_by": ["OUTCOME"], "est_minutes": 30},
+            {"id": "B", "name": "Earlier", "role": "required", "kind": "foundation", "requires": [],
+             "needed_by": ["A"], "est_minutes": 30}]})
+        out = {"sessions": [{"title": "1", "aim": "a", "minutes": 60, "teaches": ["A"], "proof": "p"},
+                            {"title": "2", "aim": "b", "minutes": 60, "teaches": ["B"], "proof": "p"}],
+               "projects": [], "deferred": [], "trimmed": []}
+        got = pipeline.check_outline_v2(out, m, self.BRIEF,
+                                        {"sessions": 2, "minutes": [60, 60], "unit": "session", "total": 120})
+        self.assertTrue(any("before what it needs" in t for t in got), got)
