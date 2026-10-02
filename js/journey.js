@@ -83,6 +83,22 @@ export function conflicts(a) {
     const r = rq.weekly ? weeklyPattern(a, rq.weeks, rq.perWeek) : parsePattern(a.pattern.text, rq.total);
     if (r.error) out.push({ id: 'pattern', text: r.error, choices: [{ label: 'Change the meetings', edit: 'pattern' }, { label: 'Change the length', edit: 'time' }] });
   }
+  // "Mostly alone" and "no independent time" cannot both be true. Nothing compared these two answers, so a
+  // brief could ask for most of the work to happen outside the meetings while giving that work no minutes at
+  // all. The writer follows the brief, places independent work, and the project check then refuses it for
+  // putting minutes "in independent work, but the brief has no independent time" — a contradiction the person
+  // never got to see, surfacing as a failure several stages later.
+  const split = (a.split || {}).value, ownPer = ownMinutes(a);
+  if (!ownPer && usesWeeks(a) && ['mostown', 'half', 'none', 'checkin'].includes(split)) {
+    const said = { mostown: 'most of the work happens alone, with short live sessions',
+                   half: 'about half the work happens alone',
+                   none: 'nothing is live: all of it happens in their own time',
+                   checkin: 'the work happens in their own time, with a short live check-in' }[split];
+    out.push({ id: 'ownsplit',
+      text: `You said ${said}, and that independent work gets no time. Those cannot both hold: work outside the meetings needs minutes of its own, or there is nothing to do alone.`,
+      choices: [{ label: 'Give independent work some time', edit: 'own' },
+                { label: 'Change how much happens live', edit: 'split' }] });
+  }
   if (tp.mode === 'separate' && rq.n != null && k > rq.n && !out.length) out.push({ id: 'fit', text: `${k} separate topics need at least ${k} ${unit}s. ${rq.span} gives ${rq.n}.`, choices: [{ label: 'Add time', edit: 'time' }, { label: 'Choose fewer topics', edit: 'mix' }, { label: 'Let topics share sessions', edit: 'mode' }] });
   return out;
 }

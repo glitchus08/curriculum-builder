@@ -4245,3 +4245,77 @@ class ARequiresLineCanBeCorrectedWithoutTouchingTheCheck(unittest.TestCase):
         got = pipeline.check_outline_v2(out, m, self.BRIEF,
                                         {"sessions": 2, "minutes": [60, 60], "unit": "session", "total": 120})
         self.assertTrue(any("before what it needs" in t for t in got), got)
+
+
+class TheRealPausedShapeNeedsMoreThanEdgeCorrections(unittest.TestCase):
+    """Modelled on a real paused run: a second outline attempt with many prerequisite errors at once, and an
+    earlier rewrite that failed the independent-time and project checks as well.
+
+    The point of this one is that correcting `requires` lines is NOT the whole repair. A map can be corrected
+    until the ordering check is silent and the outline still be refused, because the time and the projects are
+    wrong for a different reason. Topic names are generic; nothing here carries course content.
+    """
+
+    def _map(self, n=9):
+        """One umbrella subject and n stages, every stage wrongly listed as a prerequisite of the subject."""
+        nodes = [{"id": "U", "name": "The whole subject", "role": "required", "kind": "requested",
+                  "est_minutes": 60, "requires": [f"S{i}" for i in range(n)], "needed_by": ["OUTCOME"]}]
+        nodes += [{"id": f"S{i}", "name": f"Stage {i}", "role": "required", "kind": "subtopic",
+                   "est_minutes": 30, "requires": [], "needed_by": ["U"]} for i in range(n)]
+        return {"nodes": nodes}
+
+    def _outline(self, independent_project_minutes=0):
+        return {"sessions": [
+            {"title": "One", "aim": "a", "minutes": 90, "teaches": ["U"], "proof": "p"},
+            {"title": "Two", "aim": "b", "minutes": 90, "teaches": [f"S{i}" for i in range(9)], "proof": "p"}],
+            "projects": [{"id": "P1", "title": "A small piece of work", "kind": "minor",
+                          "node_ids": ["U"], "available_after_session": 1, "sessions": [2],
+                          "minutes": {"live": 30, "independent": independent_project_minutes},
+                          "milestones": [{"session": 2, "what": "hand it in", "live_minutes": 30,
+                                          "independent_minutes": independent_project_minutes}],
+                          "hand_in": "the work"}],
+            "deferred": [], "trimmed": []}
+
+    BRIEF = {"topics": ["a subject"], "outcome": "o"}
+    PLAN_NO_OWN = {"sessions": 2, "minutes": [90, 90], "unit": "session", "total": 180}
+
+    def _problems(self, m, out, plan=None):
+        from loom_server import pipeline
+        return pipeline.check_outline_v2(out, m, self.BRIEF, plan or self.PLAN_NO_OWN)
+
+    def test_many_prerequisite_errors_arrive_at_once_not_one_at_a_time(self):
+        from loom_server import pipeline
+        got = [t for t in self._problems(pipeline.derive_map(self._map()), self._outline())
+               if "before what it needs" in t]
+        self.assertEqual(len(got), 9, "every reversed line is reported, so a repair can be planned in one pass")
+
+    def test_correcting_the_edges_silences_the_ordering_check_only(self):
+        """Corrections fix what they are for. They do not make a wrong time plan right."""
+        from loom_server import pipeline
+        m = dict(self._map(), edgeCorrections=[
+            {"node": "U", "removes": f"S{i}", "kind": "contained_in",
+             "why": "a stage of the subject", "by": "the owner", "at": "2026-10-02T00:00:00Z"} for i in range(9)])
+        m = pipeline.derive_map(m)
+        # The outline now places independent project minutes against a plan that has none.
+        got = self._problems(m, self._outline(independent_project_minutes=45))
+        self.assertEqual([t for t in got if "before what it needs" in t], [], "ordering is clear")
+        self.assertTrue(any("no independent time" in t for t in got),
+                        f"and the time conflict is still refused, as it should be: {got}")
+
+    def test_the_whole_repair_passes_every_check_together(self):
+        from loom_server import pipeline
+        m = pipeline.derive_map(dict(self._map(), edgeCorrections=[
+            {"node": "U", "removes": f"S{i}", "kind": "contained_in",
+             "why": "a stage of the subject", "by": "the owner", "at": "2026-10-02T00:00:00Z"} for i in range(9)]))
+        got = self._problems(m, self._outline(independent_project_minutes=0))
+        self.assertEqual([t for t in got if "before what it needs" in t], [])
+        self.assertEqual([t for t in got if "independent" in t], [])
+
+    def test_the_original_map_is_still_readable_after_every_correction(self):
+        from loom_server import pipeline
+        m = pipeline.derive_map(dict(self._map(), edgeCorrections=[
+            {"node": "U", "removes": "S0", "kind": "contained_in", "why": "a stage", "by": "o",
+             "at": "2026-10-02T00:00:00Z"}]))
+        u = next(n for n in m["nodes"] if n["id"] == "U")
+        self.assertEqual(len(u["requiresAsGiven"]), 9, "the map's own claim is intact")
+        self.assertEqual(len(u["requires"]), 8, "one line corrected, the rest untouched")

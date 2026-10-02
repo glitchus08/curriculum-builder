@@ -239,6 +239,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     raise storage.StoreError("The change request is incomplete.")
                 rec = engine.runner(store, cid).start(action, b)
                 return self.send_json({"record": rec, "busy": True})
+            if rest == ["map-correction"] and method == "POST":
+                # Like the attribution decision, deliberately NOT an engine action: correcting a `requires`
+                # line is a judgement about the map a person can read, and needs no model.
+                b = self.body()
+                storage.course_dir(store, cid)
+                got = engine.record_edge_correction(store, cid, str(b.get("node") or ""),
+                                                   str(b.get("removes") or ""), b if isinstance(b, dict) else {})
+                return self.send_json({"correction": got})
             if rest == ["attribution-resolution"] and method == "POST":
                 # Deliberately NOT under the engine route: that one refuses when the Claude tool is not ready,
                 # and a person deciding between two answers the review already gave needs no model at all.

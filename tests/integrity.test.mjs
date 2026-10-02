@@ -359,3 +359,28 @@ test('1: the teacher pack puts what is waiting on a person in front of the teach
   const learner = J.packHTML(pkg, 'learner');
   assert.ok(!learner.includes('Waiting on a person'), 'the learner pack still carries no internal review detail');
 });
+
+// A brief could say most of the work happens alone AND give that work no minutes. Nothing compared the two
+// answers, so the contradiction surfaced several stages later as a project-check refusal — "puts minutes in
+// independent work, but the brief has no independent time" — which the person never had a chance to resolve.
+test('1: "mostly alone" with no independent time is a conflict the brief surfaces, with fixes', () => {
+  const b = { entry:'have', topic:'a subject', audience:'college', prior:'some', outcome:'o',
+              delivery:'room', limits:['none'], format:'course', shape:'weekly', weeks:'w6', hours:'h5' };
+  for (const split of ['mostown', 'half']) {
+    const c = J.conflicts(brief({ ...b, split, own:'none' }));
+    const hit = c.find(x => x.id === 'ownsplit');
+    assert.ok(hit, `${split} with no independent time must be refused as a conflict`);
+    assert.match(hit.text, /cannot both hold/);
+    assert.deepEqual(hit.choices.map(x => x.edit).sort(), ['own', 'split'],
+      'and it offers both ways out: give the work time, or change how much is live');
+  }
+});
+
+test('1: a brief that is consistent raises no such conflict', () => {
+  const b = { entry:'have', topic:'a subject', audience:'college', prior:'some', outcome:'o',
+              delivery:'room', limits:['none'], format:'course', shape:'weekly', weeks:'w6', hours:'h5' };
+  assert.equal(J.conflicts(brief({ ...b, split:'mostlive', own:'none' })).find(x => x.id === 'ownsplit'), undefined,
+    'mostly live with no independent time is coherent');
+  assert.equal(J.conflicts(brief({ ...b, split:'mostown', own:'i2' })).find(x => x.id === 'ownsplit'), undefined,
+    'mostly alone with two hours a week is coherent');
+});
