@@ -2496,6 +2496,9 @@ class Runner:
                     rec["stages"]["outline_review"] = {"status": "todo"}
             if action == "edit":
                 rec["statusBeforeEdit"] = rec.get("status") if rec.get("status") in ("done", "waiting_approval", "idle") else "done"
+                # A record that never went through `begin` has no edits table. That is not a reason to hand the
+                # page a raw KeyError: the same empty table `begin` would have made is made here instead.
+                rec.setdefault("edits", {})
                 rec["edits"][payload["editId"]] = {"id": payload["editId"], "scope": payload["scope"], "instruction": payload["instruction"], "aboutTime": bool(payload.get("aboutTime")),
                                                    "baseRev": payload.get("baseRev"), "baseUid": payload.get("baseUid"), "status": "todo", "askedAt": storage.now_iso(),
                                                    "req": payload.get("req") if isinstance(payload.get("req"), dict) else None,

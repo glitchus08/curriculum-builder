@@ -3987,3 +3987,21 @@ class ACombinationMustEarnItsPlace(unittest.TestCase):
             self.skipTest("this fixture stops before an outline; coverage is tested in the outline tests")
         for r in rows:
             self.assertIn("taughtInSession", r, f"{r.get('name')} must say where it is taught")
+
+
+class AnEditOnARecordWithoutAnEditsTableIsNotACrash(unittest.TestCase):
+    """A record that never went through `begin` has no edits table, and the client got a raw KeyError."""
+
+    def test_the_edit_action_makes_the_table_rather_than_raising(self):
+        f, cid, rec = begin("edit-no-table")
+        r = engine.runner("pipe", cid).load()
+        r.pop("edits", None)
+        r["status"] = "done"
+        engine.runner("pipe", cid).save(r)
+        engine.runner("pipe", cid).start("edit", {
+            "action": "edit", "scope": "session", "editId": "edit0001",
+            "instruction": "Use a bakery as the example", "parts": [{"sessionId": "s1"}]})
+        wait(cid)
+        got = engine.runner("pipe", cid).load()
+        self.assertIn("edits", got, "the same empty table begin would have made")
+        self.assertIn("edit0001", got["edits"])

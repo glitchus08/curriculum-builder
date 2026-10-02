@@ -536,3 +536,27 @@ test('refreshed evidence persists through serialization without overwriting pers
   assert.equal(reloaded.derivedStateStale, undefined);
   assert.equal(R.mergeEvidence(reloaded, e), 0);
 });
+
+// A journey whose `research` object exists but lacks the keys the checks screen reads used to throw, and the
+// app turned a perfectly valid saved course into "Loom cannot read this course". mergeEvidence creates
+// `research` when a record has lineage or coverage, so this is reachable on any journey that never had one.
+test('a research object without openQuestions or notOpened does not break the checks screen', () => {
+  const j = draft(); j.pipeline = 2;
+  j.map = { nodes: [{ id: 'N1', name: 'A topic', role: 'required', kind: 'requested' }], assumed_entry: [], stop_reason: 'x' };
+  j.coverage = { rows: [] }; j.accounting = { statement: '' }; j.agents = {}; j.projects = [];
+  j.research = { nodeCoverage: [{ node: 'N1', name: 'A topic', role: 'required', status: 'partly' }] };
+  assert.doesNotThrow(() => V2.checksExtras(j, { esc: s => String(s == null ? '' : s), more: (a, b) => b }),
+    'a coverage row with no sources list must not throw');
+  assert.equal((j.research.openQuestions || []).length, 0);
+  assert.equal((j.research.notOpened || []).length, 0);
+});
+
+test('mergeEvidence creates a research object that the checks screen can read', () => {
+  const j = draft(), e = record();
+  delete j.research;
+  e.stages.research.output = Object.assign({}, e.stages.research.output, { nodeCoverage: [{ node: 'N1', status: 'partly' }] });
+  R.mergeEvidence(j, e);
+  assert.ok(j.research, 'it is created');
+  assert.doesNotThrow(() => (j.research.openQuestions || []).length);
+  assert.doesNotThrow(() => (j.research.notOpened || []).length);
+});
